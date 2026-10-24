@@ -4,6 +4,7 @@ main.py - Main CLI entry point for the Automated VAR Computer Vision Pipeline.
 Usage:
     python -m cv_pipeline.main --source match_clip.mp4 --output var_output.mp4
     python -m cv_pipeline.main --synthetic --output synthetic_var_output.mp4
+    python -m cv_pipeline.main --server --port 8000
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from .detector import PlayerDetector, TrackedObject
 from .homography import PitchHomography
 from .incident_detector import IncidentDetector
 from .offside_engine import OffsideEngine
+from .pose_analyzer import PoseAnalyzer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -81,11 +83,12 @@ def run_pipeline(
     max_frames: int = 300,
 ) -> None:
     """Executes the VAR computer vision processing pipeline on video footage."""
-    logger.info("Initializing Automated Football VAR Pipeline...")
+    logger.info("Initializing Automated Football VAR Pipeline v3.0...")
 
     homography = PitchHomography()
     detector = PlayerDetector(confidence_threshold=0.35, device=device)
     offside_engine = OffsideEngine(homography, attacking_direction=1, attacking_team="Team A", defending_team="Team B")
+    pose_analyzer = PoseAnalyzer(homography, device=device)
     incident_detector = IncidentDetector(homography, fps=60, output_dir="./var_incidents")
 
     if is_synthetic or source_path is None:
@@ -123,25 +126,33 @@ def run_pipeline(
             else:
                 frame = generate_synthetic_frame(frame_idx, width, height)
 
-            # 1. Detect & Track Objects
+            # 1. Automatic White-Line & Keypoint Homography Updating
+            homography.estimate_from_frame(frame)
+
+            # 2. Detect & Track Objects (with circular HSV and outlier rejection)
             tracked_objects = detector.process_frame(frame, frame_idx)
 
-            # 2. Track Ball & Kick Point Detection
+            # 3. Track Ball & Kick Point Detection with player proximity check
             ball_obj = next((obj for obj in tracked_objects if obj.class_name == "ball"), None)
-            kick_frame = offside_engine.update_ball_trajectory(frame_idx, ball_obj)
+            kick_frame = offside_engine.update_ball_trajectory(frame_idx, ball_obj, tracked_objects)
 
-            # 3. Offside Check
+            # 4. Offside Check (with 3-second locked pass frame hold)
             offside_res = offside_engine.evaluate_offside(frame_idx, tracked_objects)
             if offside_res is not None:
                 last_offside_result = offside_res
 
-            # 4. Penalty / Contact Incident Trigger
+            # 5. Skeletal Pose & Law 12 Handball Silhouette Analysis
+            poses = pose_analyzer.extract_poses(frame, tracked_objects)
+            handball_event = None
+            if ball_obj:
+                handball_event = pose_analyzer.check_handball_contact(frame_idx, ball_obj.feet_pos, poses)
+
+            # 6. Penalty / Contact Incident Trigger
             incident_payload = incident_detector.process_frame(frame_idx, frame, tracked_objects)
 
-            # 5. Visual Render
+            # 7. Visual Render
             display_frame = frame.copy()
 
-            # Render bounding boxes
             for obj in tracked_objects:
                 x1, y1, x2, y2 = [int(v) for v in obj.bbox]
                 if obj.class_name == "ball":
@@ -156,6 +167,11 @@ def run_pipeline(
             # Render SAOT Overlay if available
             if last_offside_result is not None:
                 display_frame = offside_engine.draw_offside_overlay(display_frame, last_offside_result)
+
+            # Render Handball alert if detected
+            if handball_event:
+                cv2.putText(display_frame, f"HANDBALL ALERT: {handball_event.arm_involved} ({handball_event.silhouette_angle_deg:.1f} DEG)",
+                            (width // 2 - 300, 85), cv2.FONT_HERSHEY_DUPLEX, 0.8, (0, 0, 255), 2)
 
             # Render top bar status
             status_text = "VAR STATUS: MONITORING (ALL FEEDS ACTIVE)"
@@ -181,21 +197,28 @@ def run_pipeline(
 
 def main() -> None:
     """CLI Argument Parser."""
-    parser = argparse.ArgumentParser(description="Automated Football VAR Computer Vision Pipeline")
+    parser = argparse.ArgumentParser(description="Automated Football VAR Computer Vision Pipeline v3.0")
     parser.add_argument("--source", type=str, default=None, help="Path to input match video (.mp4)")
     parser.add_argument("--output", type=str, default="var_output.mp4", help="Path to output annotated video (.mp4)")
     parser.add_argument("--device", type=str, default="cpu", help="Compute device ('cpu', 'cuda', 'mps')")
     parser.add_argument("--synthetic", action="store_true", help="Generate synthetic match footage for testing")
     parser.add_argument("--frames", type=int, default=180, help="Number of frames to process in synthetic mode")
+    parser.add_argument("--server", action="store_true", help="Launch FastAPI + WebSocket telemetry server")
+    parser.add_argument("--port", type=int, default=8000, help="Port for FastAPI server (default: 8000)")
 
     args = parser.parse_args()
-    run_pipeline(
-        source_path=args.source,
-        output_path=args.output,
-        device=args.device,
-        is_synthetic=args.synthetic or (args.source is None),
-        max_frames=args.frames,
-    )
+
+    if args.server:
+        from .server import start_server
+        start_server(port=args.port)
+    else:
+        run_pipeline(
+            source_path=args.source,
+            output_path=args.output,
+            device=args.device,
+            is_synthetic=args.synthetic or (args.source is None),
+            max_frames=args.frames,
+        )
 
 
 if __name__ == "__main__":

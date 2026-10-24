@@ -1,8 +1,8 @@
-# ⚽ VAR Control Room & Match Review Workstation
+# ⚽ VAR Control Room & Match Review Workstation v3.0
 
 An elite, IFAB-certified **Video Assistant Referee (VAR) Suite** featuring:
 1. **Full-Stack Interactive VAR Control Room Web Application** (React 19, TypeScript, Tailwind CSS, HTML5 Canvas 3D Perspective Projection, Web Audio API).
-2. **Modular Computer Vision VAR Pipeline** (Python, YOLOv8, ByteTrack, Planar Homography, SAOT Offside Engine, Penalty Incident Detector).
+2. **Modular Computer Vision VAR Pipeline & FastAPI Telemetry Bridge** (Python, YOLOv8-Pose 17-keypoint estimation, ByteTrack, Planar Homography, SAOT Offside Engine, Penalty Incident Detector, WebSocket Bridge).
 
 ---
 
@@ -11,27 +11,14 @@ An elite, IFAB-certified **Video Assistant Referee (VAR) Suite** featuring:
 ### Core Modules:
 - **Multi-Angle Synchronized Video Playback Deck**:
   - 4-camera synchronized array: `CAM-01: Main Wide`, `CAM-02: 16-Yard Offside Line`, `CAM-03: Behind Goal Low`, `CAM-04: High Tactical Spidercam`.
-  - Primary maximized monitor + 3 synchronized picture-in-picture thumbnails, or 2x2 Quad Grid mode.
+  - 3 view layouts: **`Primary + PIP`**, **`2x2 Quad Grid`**, and **`Split-Screen Dual Compare`** (synchronized side-by-side angle review).
   - Broadcast playback controls: Frame-by-frame stepping (`-1f` / `+1f` at 60fps), Jog/Shuttle slider (`10%`, `25%`, `50%`, `100%`, `200%`), Loop Point A-to-B, and "Freeze at Kick Point".
-  - Built-in Interactive Pitch Simulator mode (HTML5 Canvas) with 3 pre-loaded animated match scenarios + support for custom `.mp4` video uploads.
-- **Semi-Automated Offside Technology (SAOT) Calibration Tool**:
-  - Interactive 2D/3D pitch perspective overlay.
-  - Pass Frame Lock (moment of kick contact per IFAB Law 11).
-  - Dual crosshairs for 2nd-last defender and leading attacker with anatomical body part selection and millimeter micro-nudge controls.
-  - Real-time parallax-adjusted 3D offside lines across the pitch turf with high-contrast distance delta badge (`OFFSIDE: +14.2 cm` in crimson or `ONSIDE: -8.5 cm` in emerald).
-  - 2D radar minimap in bottom corner.
-- **IFAB Decision Tree & Guided Checklist Wizard**:
-  - Covers all 4 reviewable categories: Goal/No Goal, Penalty/No Penalty, Direct Red Card, Mistaken Identity.
-  - Dynamic *DOGSO 4-Criteria Calculator* with Double Jeopardy inside-the-box downgrade logic (Red -> Yellow).
-  - Dynamic *Serious Foul Play (SFP) Matrix* assessing speed, exposed studs, contact point, and endangerment.
-  - Dynamic *Handball Evaluator* assessing unnatural silhouette, deliberate movement, and immediate goalscorer contact.
-- **Referee Communication & Broadcast Graphics**:
-  - Live Status Banner with 1-click state transitions: `MONITORING` ➔ `VAR CHECK IN PROGRESS` ➔ `ON-FIELD REVIEW (OFR)` ➔ `CHECK COMPLETE`.
-  - Auto-generated IFAB-standard radio transmission script.
-  - Push-to-Talk (PTT) with Web Audio API radio chirp and squelch synthesis.
-  - Stadium Giant Screen Jumbotron & TV Broadcast Lower Thirds preview modal.
-- **Incident Log & Audit Export**:
-  - Match timeline with review duration timers, original vs final decisions, and export to JSON / Print formatted report.
+  - **Attacking Possession Phase (APP) Rewind Scrubber**: Visual phase markers (`Possession Regained` &rarr; `Buildup Challenge` &rarr; `Kick Point` &rarr; `Incident`) to audit attacking fouls in the buildup.
+  - **Broadcast Telestrator & Tactical Drawing Suite**: Freehand tactical pen, directional vector arrows, player spotlight halo ring, angle/distance protractor, and a **2x–4x Picture-in-Picture Zoom Loupe (Magnifier)** over contact points.
+  - **Referee Review Area (RRA) Pitch-Side Monitor Mode**: High-contrast simplified layout for the center referee looping incident contact frames at 25% slow-mo then automatically transitioning to 100% normal speed.
+  - **Goal-Line Technology (GLT) Hawkeye Sensor Suite**: Interactive top-down and turf cross-section Hawkeye visualizer with `12.0cm` line width, `22.0cm` ball, millimeter overhang calculation, and referee watch vibration alert (`GLT SIGNAL: GOAL / NO GOAL`).
+  - **AI VAR Co-Pilot Assistant**: Neural frame telemetry analyzer providing instant confidence scores, IFAB Law clause citations, and 1-click decision synchronization.
+  - **Hardware Keyboard Shortcuts (EVS Controller mapping)**: `Space` (Play/Pause), `← / →` (`-1f / +1f`), `Shift + ← / →` (`-10f / +10f`), `K` (Kick Point), `I` (Incident Point), `1`–`4` (Switch Cams), `[` / `]` (Loop In/Out), `L` (Toggle Loop).
 
 ### Quick Start (Web App):
 ```bash
@@ -47,32 +34,41 @@ npm run build
 
 ---
 
-## 🐍 2. Python Computer Vision VAR Pipeline
+## 🐍 2. Python Computer Vision VAR Pipeline & Backend Bridge
 
-Located in the `cv_pipeline/` directory:
+Located in the [`cv_pipeline/`](cv_pipeline/) directory:
 
-- `detector.py`: YOLOv8 object detection (`person`, `sports ball`) + ByteTrack multi-object tracking + K-Means HSV jersey color clustering for `Team A`, `Team B`, `Goalkeeper`, and `Referee`.
-- `homography.py`: Computes 4-point planar homography matrix $H$ with RANSAC, converting camera screen coordinates $(u, v)$ to metric FIFA pitch coordinates $(X, Y)$ in meters ($105\text{m} \times 68\text{m}$) and inverse projection.
-- `offside_engine.py`: Ball acceleration & foot proximity pass release detection ($t_{\text{pass}}$), 2nd-last defender identification, leading attacker comparison, and 3D perspective offside line drawing on grass with 2D radar minimap overlay.
-- `incident_detector.py`: Detects high-IoU collisions inside the 16.5m penalty box accompanied by rapid aspect ratio changes (player falling), clips a 6-second video buffer ($t - 3\text{s}$ to $t + 3\text{s}$), and outputs structured JSON event payloads.
-- `main.py`: Command-line runner supporting both real match clips and synthetic simulation mode.
+- `detector.py`: YOLOv8 object detection (`person`, `sports ball`) + ByteTrack multi-object tracking + **Circular unit-circle HSV jersey color clustering** (resolving red-jersey wrap-around) with centroid outlier rejection for Referees and Goalkeepers.
+- `homography.py`: Planar homography matrix $H$ with RANSAC, converting camera screen coordinates $(u, v)$ to metric FIFA pitch coordinates $(X, Y)$ ($105\text{m} \times 68\text{m}$). Includes **automatic white-line pitch detection** via Top-Hat morphological filtering, probabilistic Hough Line Transform (`cv2.HoughLinesP`), and Exponential Moving Average (EMA) smoothing for camera panning.
+- `pose_analyzer.py`: **YOLOv8-Pose 17-keypoint skeletal estimation**:
+  - *Law 11 SAOT*: Isolates playable body extremities (head, shoulders, hips, knees, feet) while strictly excluding arms/hands (wrists and elbows).
+  - *Law 12 Handball*: Measures arm abduction angle relative to vertical torso axis ($> 45^\circ$ = unnatural silhouette) and detects ball intersection.
+- `offside_engine.py`: Kick point detection ($t_{\text{pass}}$) via ball acceleration spike and player proximity ($< 1.2\text{m}$), with a **3-second (180-frame) locked offside line hold** and subsequent pass cooldown reset.
+- `incident_detector.py`: Detects high-IoU collisions inside the 16.5m penalty box accompanied by aspect ratio changes (player falling), clips a 6-second slow-motion buffer, and outputs JSON event payloads.
+- `server.py`: **FastAPI + WebSocket Live Bridge**:
+  - `POST /api/analyze-video`: Accepts an uploaded match clip and returns frame-by-frame JSON telemetry matching the React `ScenarioFrameState` TypeScript interface.
+  - `WS /ws/telemetry`: Streams live 60fps telemetry and synthesized broadcast frames to the React web app.
+- `main.py`: Command-line runner supporting match clips, synthetic pitch simulation, and server startup (`--server`).
 
-### Quick Start (Python Pipeline):
+### Quick Start (Python Pipeline & Server):
 ```bash
-# Install requirements
+# 1. Install requirements
 pip install -r cv_pipeline/requirements.txt
 
-# Run on custom match footage
-python -m cv_pipeline.main --source match_clip.mp4 --output var_annotated_output.mp4
+# 2. Run test suite
+pytest tests/
 
-# Or run synthetic simulation mode (no external footage needed)
-python -m cv_pipeline.main --synthetic --frames 180 --output var_synthetic_output.mp4
+# 3. Launch the FastAPI + WebSocket backend bridge
+uvicorn cv_pipeline.server:app --port 8000
+
+# 4. Or run the CV pipeline CLI directly
+python -m cv_pipeline.main --synthetic --frames 180 --output var_output.mp4
 ```
 
 ---
 
 ## 📜 3. IFAB Laws of the Game Adherence
-- **Law 10**: Determining the Outcome of the Match (Goal / No Goal)
-- **Law 11**: Offside (First point of contact, 2nd-last defender line, interfering with play)
-- **Law 12**: Fouls & Misconduct (Serious Foul Play, DOGSO double-jeopardy inside penalty box, Handball unnatural silhouette)
+- **Law 9 & 10**: The Ball In and Out of Play & Determining the Outcome of the Match (GLT 100% outer edge overhang rule).
+- **Law 11**: Offside (First point of contact, 2nd-last defender line, excluding hands/arms, own-half and behind-the-ball exemptions).
+- **Law 12**: Fouls & Misconduct (Serious Foul Play excessive force criteria, DOGSO double jeopardy inside-the-box downgrade, and handball unnatural silhouette $> 45^\circ$).
 - **VAR Protocol**: Interventions strictly restricted to Clear and Obvious Errors or Serious Missed Incidents.

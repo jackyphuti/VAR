@@ -2,13 +2,14 @@
 detector.py - Detection & Multi-Object Tracking for Football VAR.
 
 Uses YOLOv8 for object detection (person, sports ball) and ByteTrack for persistent ID tracking.
-Extracts player torso colors using K-Means in HSV space (filtering out green pitch pixels)
-to classify individuals into Team A, Team B, Goalkeeper, or Referee.
+Extracts player torso colors using circular unit-circle HSV representations (handling cyclic hue wrap-around)
+and outlier rejection to reliably isolate Team A, Team B, Goalkeeper, and Referee.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -50,14 +51,36 @@ class TrackedObject:
 class TeamClassifier:
     """
     Classifies players into Team A, Team B, Goalkeeper, and Referee
-    based on K-Means clustering of HSV torso colors.
-    Excludes pitch green hue range before clustering.
+    using circular trigonometric projection of Hue in HSV space:
+      theta = 2 * pi * (H / 180.0)
+      feat = [cos(theta) * (S / 255.0), sin(theta) * (S / 255.0), V / 255.0]
+
+    This completely resolves the red-jersey boundary bug (where H=0..10 and H=170..180
+    wrap around the 0-180 boundary) and applies centroid outlier rejection for Referees/Goalkeepers.
     """
 
-    def __init__(self, n_teams: int = 2):
+    def __init__(self, n_teams: int = 2, outlier_dist_threshold: float = 0.42):
         self.n_teams = n_teams
-        self.team_centers_hsv: Optional[np.ndarray] = None
+        self.outlier_dist_threshold = outlier_dist_threshold
+        self.team_centroids_feature: Optional[np.ndarray] = None
         self.is_calibrated: bool = False
+
+    @staticmethod
+    def hsv_to_circular_feature(hsv: np.ndarray) -> np.ndarray:
+        """
+        Maps (H, S, V) into 3D unit-cylinder circular coordinates:
+          H in [0, 180] -> theta in [0, 2*pi]
+          feature = [cos(theta) * S_norm, sin(theta) * S_norm, V_norm]
+        """
+        h = float(hsv[0])
+        s = float(hsv[1]) / 255.0
+        v = float(hsv[2]) / 255.0
+
+        theta = 2.0 * math.pi * (h / 180.0)
+        cos_h = math.cos(theta) * s
+        sin_h = math.sin(theta) * s
+
+        return np.array([cos_h, sin_h, v], dtype=np.float32)
 
     @staticmethod
     def extract_torso_hsv(image: np.ndarray, bbox: Tuple[float, float, float, float]) -> Optional[np.ndarray]:
@@ -75,7 +98,6 @@ class TeamClassifier:
         if w < 10 or h < 20:
             return None
 
-        # Torso bounding box
         tx1 = int(x1 + 0.2 * w)
         tx2 = int(x1 + 0.8 * w)
         ty1 = int(y1 + 0.25 * h)
@@ -87,7 +109,7 @@ class TeamClassifier:
 
         hsv_crop = cv2.cvtColor(torso_crop, cv2.COLOR_BGR2HSV)
 
-        # Exclude green grass in HSV (Hue roughly 35-85, Saturation > 40)
+        # Exclude green grass in HSV (Hue 35-85, Saturation > 40)
         lower_green = np.array([35, 40, 40], dtype=np.uint8)
         upper_green = np.array([85, 255, 255], dtype=np.uint8)
         mask = cv2.inRange(hsv_crop, lower_green, upper_green)
@@ -97,47 +119,72 @@ class TeamClassifier:
         if len(valid_pixels) < 20:
             return np.mean(hsv_crop.reshape(-1, 3), axis=0)
 
-        # Return mean or median HSV of jersey
         return np.median(valid_pixels, axis=0)
 
-    def fit(self, samples: List[np.ndarray]) -> None:
-        """Fits KMeans on collected torso HSV samples to establish Team A and Team B palettes."""
-        if not SKLEARN_AVAILABLE or len(samples) < 4:
-            logger.warning("Not enough samples or scikit-learn missing; using fallback team splitting.")
+    def fit(self, hsv_samples: List[np.ndarray]) -> None:
+        """
+        Fits KMeans in circular trigonometric feature space to determine Team A and Team B centroids.
+        """
+        if not SKLEARN_AVAILABLE or len(hsv_samples) < 4:
+            logger.warning("Not enough samples or scikit-learn missing; using heuristic team classifier.")
             return
 
-        data = np.array(samples)
-        # Weight Hue and Value more than Saturation
-        weights = np.array([2.0, 1.0, 1.2])
-        weighted_data = data * weights
+        features = [self.hsv_to_circular_feature(s) for s in hsv_samples]
+        data = np.array(features, dtype=np.float32)
+
+        # Filter out extreme black outliers (referees) before team centroid fitting
+        valid_for_teams = [f for f in data if f[2] > 0.25]
+        if len(valid_for_teams) >= 4:
+            data = np.array(valid_for_teams)
 
         kmeans = KMeans(n_clusters=self.n_teams, random_state=42, n_init=10)
-        kmeans.fit(weighted_data)
-        self.team_centers_hsv = kmeans.cluster_centers_ / weights
+        kmeans.fit(data)
+        self.team_centroids_feature = kmeans.cluster_centers_
         self.is_calibrated = True
-        logger.info("Team color classifier calibrated with centers: %s", self.team_centers_hsv)
+        logger.info("Team color classifier calibrated in circular HSV space.")
 
-    def predict(self, hsv_color: np.ndarray) -> str:
-        """Classifies a given torso HSV color into a team or referee."""
-        if not self.is_calibrated or self.team_centers_hsv is None:
-            # Fallback heuristic: Hue split
-            return "Team A" if hsv_color[0] < 90 else "Team B"
+    def predict(self, hsv_color: np.ndarray, is_near_goal: bool = False) -> str:
+        """
+        Classifies an HSV color into Team A, Team B, Goalkeeper, or Referee
+        using circular distance metrics and outlier rejection.
+        """
+        h, s, v = hsv_color[0], hsv_color[1], hsv_color[2]
 
-        # Check for Referee (typically high-vis neon yellow/green or solid black)
-        # Very low value (< 45) -> Black kit referee
-        if hsv_color[2] < 45:
+        # 1. Distinct Referee kit signatures:
+        # Deep black kit (V < 50)
+        if v < 50:
             return "Referee"
 
-        dists = [np.linalg.norm(hsv_color - center) for center in self.team_centers_hsv]
-        min_idx = int(np.argmin(dists))
-        return f"Team {'A' if min_idx == 0 else 'B'}"
+        # High-vis neon yellow / lime referee kit (H ~ 25..40, S > 180, V > 200)
+        if 25 <= h <= 40 and s > 180 and v > 200:
+            return "Referee"
+
+        feat = self.hsv_to_circular_feature(hsv_color)
+
+        if not self.is_calibrated or self.team_centroids_feature is None:
+            # Fallback heuristic using circular coordinate cos(theta)
+            return "Team A" if feat[0] > 0 else "Team B"
+
+        # 2. Compute circular Euclidean distances to team centroids
+        dists = [float(np.linalg.norm(feat - center)) for center in self.team_centroids_feature]
+        min_dist = min(dists)
+        best_team_idx = int(np.argmin(dists))
+
+        # 3. Outlier rejection: if point is far from both team centroids
+        if min_dist > self.outlier_dist_threshold:
+            # If player is stationed near goal mouth or wearing distinct neon jersey -> Goalkeeper
+            if is_near_goal or (s > 150 and v > 150):
+                return "Goalkeeper"
+            return "Referee"
+
+        return "Team A" if best_team_idx == 0 else "Team B"
 
 
 class PlayerDetector:
     """
     Main detection and tracking pipeline.
     Combines YOLOv8 inference, ByteTrack multi-object tracker,
-    and torso color classification.
+    and circular HSV color classification with outlier rejection.
     """
 
     def __init__(
@@ -150,7 +197,7 @@ class PlayerDetector:
         self.device = device
         self.team_classifier = TeamClassifier()
         self.collected_samples: List[np.ndarray] = []
-        self.calibration_limit = 60
+        self.calibration_limit = 50
 
         if ULTRALYTICS_AVAILABLE:
             try:
@@ -173,28 +220,19 @@ class PlayerDetector:
     def process_frame(self, frame: np.ndarray, frame_idx: int = 0) -> List[TrackedObject]:
         """
         Executes inference, tracking, and team attribution on a single video frame.
-
-        Args:
-            frame: BGR numpy image (1080p recommended).
-            frame_idx: Index of current frame for temporal calibration.
-
-        Returns:
-            List of TrackedObject instances.
         """
         if not self.yolo_active:
             return self._simulate_detections(frame, frame_idx)
 
-        # Run YOLOv8 inference
         results = self.model.predict(
             source=frame,
             conf=self.conf,
             device=self.device,
-            classes=[0, 32],  # 0: person, 32: sports ball
+            classes=[0, 32],
             verbose=False,
         )[0]
 
         detections = sv.Detections.from_ultralytics(results)
-        # Separate ball vs players for tracking (balls are fast and better detected directly)
         person_mask = (detections.class_id == 0)
         ball_mask = (detections.class_id == 32)
 
@@ -202,21 +240,23 @@ class PlayerDetector:
         tracked_persons = self.tracker.update_with_detections(person_detections)
 
         tracked_objects: List[TrackedObject] = []
+        h_img, w_img = frame.shape[:2]
 
-        # Process tracked persons
         for i in range(len(tracked_persons)):
             bbox = tuple(tracked_persons.xyxy[i])
             track_id = int(tracked_persons.tracker_id[i]) if tracked_persons.tracker_id is not None else i
             conf = float(tracked_persons.confidence[i]) if tracked_persons.confidence is not None else 0.85
 
             hsv = self.team_classifier.extract_torso_hsv(frame, bbox)
+            is_near_goal = bbox[2] > w_img * 0.85 or bbox[0] < w_img * 0.15
+
             if hsv is not None:
                 if len(self.collected_samples) < self.calibration_limit:
                     self.collected_samples.append(hsv)
                     if len(self.collected_samples) == self.calibration_limit:
                         self.team_classifier.fit(self.collected_samples)
 
-                team = self.team_classifier.predict(hsv)
+                team = self.team_classifier.predict(hsv, is_near_goal=is_near_goal)
             else:
                 team = "Team A"
 
@@ -230,7 +270,6 @@ class PlayerDetector:
             )
             tracked_objects.append(obj)
 
-        # Process ball (untracked or single-frame ID -1)
         ball_detections = detections[ball_mask]
         if len(ball_detections) > 0:
             best_ball_idx = int(np.argmax(ball_detections.confidence))
@@ -249,16 +288,14 @@ class PlayerDetector:
         return tracked_objects
 
     def _simulate_detections(self, frame: np.ndarray, frame_idx: int) -> List[TrackedObject]:
-        """Synthetic detection generator for testing environments without GPU or YOLO weights."""
+        """Synthetic detection generator for testing environments without GPU or weights."""
         h, w = frame.shape[:2]
         objects: List[TrackedObject] = []
 
-        # Synthesize 4 defenders, 3 attackers, 1 goalkeeper, 1 referee, 1 ball
         base_x = w * 0.45 + (frame_idx % 200) * 0.4
         ball_x = base_x + 50 + (frame_idx * 1.5) % 150
         ball_y = h * 0.65
 
-        # Ball
         objects.append(
             TrackedObject(
                 track_id=-1,
@@ -266,6 +303,28 @@ class PlayerDetector:
                 bbox=(ball_x - 8, ball_y - 8, ball_x + 8, ball_y + 8),
                 confidence=0.92,
                 team=None,
+            )
+        )
+
+        # Goalkeeper
+        objects.append(
+            TrackedObject(
+                track_id=1,
+                class_name="person",
+                bbox=(w * 0.90, h * 0.50, w * 0.90 + 36, h * 0.50 + 90),
+                confidence=0.94,
+                team="Goalkeeper",
+            )
+        )
+
+        # Referee
+        objects.append(
+            TrackedObject(
+                track_id=99,
+                class_name="person",
+                bbox=(w * 0.40, h * 0.48, w * 0.40 + 34, h * 0.48 + 88),
+                confidence=0.90,
+                team="Referee",
             )
         )
 

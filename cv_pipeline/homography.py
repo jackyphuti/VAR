@@ -6,6 +6,8 @@ where:
   - Pitch dimensions: 105.0 meters length x 68.0 meters width.
   - Coordinate system: Origin (0, 0) at top-left corner flag, (105, 0) at top-right corner,
     (105, 68) at bottom-right corner, (0, 68) at bottom-left corner.
+Includes automatic pitch white-line detection via Top-Hat morphological filtering, Hough Line Transform,
+and Exponential Moving Average (EMA) temporal smoothing for dynamic camera panning.
 """
 
 from __future__ import annotations
@@ -33,9 +35,15 @@ class PitchHomography:
     and FIFA pitch coordinate space (meters).
     """
 
-    def __init__(self, pitch_length: float = PITCH_LENGTH_M, pitch_width: float = PITCH_WIDTH_M):
+    def __init__(
+        self,
+        pitch_length: float = PITCH_LENGTH_M,
+        pitch_width: float = PITCH_WIDTH_M,
+        ema_alpha: float = 0.15,
+    ):
         self.pitch_length = pitch_length
         self.pitch_width = pitch_width
+        self.ema_alpha = ema_alpha
         self.H: Optional[np.ndarray] = None
         self.H_inv: Optional[np.ndarray] = None
         self._init_default_camera_matrix()
@@ -45,15 +53,13 @@ class PitchHomography:
         Initializes a default perspective matrix matching a standard 1080p broadcast wide camera.
         Assumes the camera overlooks the right-hand attacking half from the main stand.
         """
-        # Standard camera points (pixels in 1920x1080)
         src_points = np.array([
-            [260.0, 320.0],    # Near halfway line touchline
-            [1660.0, 330.0],   # Far goal line top touchline
-            [1880.0, 980.0],   # Far goal line bottom touchline
+            [260.0, 320.0],    # Near halfway line top touchline
+            [1660.0, 330.0],   # Far goal line top corner
+            [1880.0, 980.0],   # Far goal line bottom corner
             [80.0, 960.0],     # Near halfway line bottom touchline
         ], dtype=np.float32)
 
-        # Corresponding pitch metric coordinates (meters)
         dst_points = np.array([
             [52.5, 0.0],           # Halfway line top touchline
             [105.0, 0.0],          # Goal line top corner
@@ -70,13 +76,6 @@ class PitchHomography:
     ) -> bool:
         """
         Computes the planar homography matrix using cv2.findHomography with RANSAC.
-
-        Args:
-            pixel_points: Nx2 array of (u, v) image coordinates.
-            pitch_points_meters: Nx2 array of corresponding (X, Y) pitch coordinates in meters.
-
-        Returns:
-            True if homography was successfully calculated.
         """
         if len(pixel_points) < 4 or len(pitch_points_meters) < 4:
             logger.error("At least 4 correspondence points required for homography.")
@@ -87,15 +86,99 @@ class PitchHomography:
             logger.error("cv2.findHomography failed to solve planar transform.")
             return False
 
-        self.H = H
+        if self.H is None:
+            self.H = H
+        else:
+            # Exponential Moving Average (EMA) smoothing
+            self.H = self.ema_alpha * H + (1.0 - self.ema_alpha) * self.H
+
         try:
-            self.H_inv = np.linalg.inv(H)
+            self.H_inv = np.linalg.inv(self.H)
         except np.linalg.LinAlgError:
             logger.error("Singular homography matrix encountered; cannot invert.")
             return False
 
-        logger.debug("Homography matrix updated successfully.")
         return True
+
+    def estimate_from_frame(self, frame: np.ndarray) -> bool:
+        """
+        Automatically extracts white pitch markings using Top-Hat morphology + HSV white filter
+        + probabilistic Hough Line Transform (cv2.HoughLinesP), finds intersections,
+        and smoothly updates self.H via Exponential Moving Average (EMA).
+        """
+        h_img, w_img = frame.shape[:2]
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # 1. Top-Hat morphological filtering to enhance white grass lines
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (13, 13))
+        tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)
+
+        # 2. HSV white color filter (low saturation, high value)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        white_mask = cv2.inRange(hsv, np.array([0, 0, 160], dtype=np.uint8), np.array([180, 55, 255], dtype=np.uint8))
+        combined = cv2.bitwise_and(tophat, tophat, mask=white_mask)
+        _, thresh = cv2.threshold(combined, 30, 255, cv2.THRESH_BINARY)
+
+        # 3. Probabilistic Hough Line Transform
+        lines = cv2.HoughLinesP(thresh, rho=1, theta=np.pi / 180, threshold=70, minLineLength=80, maxLineGap=25)
+        if lines is None or len(lines) < 4:
+            return False
+
+        # Classify lines into horizontal-like (touchlines) and vertical-like (goal/box lines)
+        h_lines: List[Tuple[float, float, float, float]] = []
+        v_lines: List[Tuple[float, float, float, float]] = []
+
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            angle = abs(np.arctan2(y2 - y1, x2 - x1) * 180.0 / np.pi)
+            if angle < 30.0 or angle > 150.0:
+                h_lines.append((float(x1), float(y1), float(x2), float(y2)))
+            elif 45.0 <= angle <= 135.0:
+                v_lines.append((float(x1), float(y1), float(x2), float(y2)))
+
+        if len(h_lines) < 2 or len(v_lines) < 2:
+            return False
+
+        # Find intersections between extreme horizontal and vertical lines
+        h_lines.sort(key=lambda l: (l[1] + l[3]) / 2.0)
+        v_lines.sort(key=lambda l: (l[0] + l[2]) / 2.0)
+
+        top_touch = h_lines[0]
+        bot_touch = h_lines[-1]
+        left_bound = v_lines[0]
+        right_bound = v_lines[-1]
+
+        def line_intersection(l1: Tuple[float, float, float, float], l2: Tuple[float, float, float, float]) -> Optional[Tuple[float, float]]:
+            x1, y1, x2, y2 = l1
+            x3, y3, x4, y4 = l2
+            denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+            if abs(denom) < 1e-4:
+                return None
+            px = ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denom
+            py = ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denom
+            return px, py
+
+        p_tl = line_intersection(top_touch, left_bound)
+        p_tr = line_intersection(top_touch, right_bound)
+        p_br = line_intersection(bot_touch, right_bound)
+        p_bl = line_intersection(bot_touch, left_bound)
+
+        if not (p_tl and p_tr and p_br and p_bl):
+            return False
+
+        pts_src = np.array([p_tl, p_tr, p_br, p_bl], dtype=np.float32)
+        # Validate that detected points fall inside reasonable screen bounds
+        if np.any(pts_src < -100) or np.any(pts_src[:, 0] > w_img + 200) or np.any(pts_src[:, 1] > h_img + 200):
+            return False
+
+        pts_dst = np.array([
+            [52.5, 0.0],
+            [105.0, 0.0],
+            [105.0, 68.0],
+            [52.5, 68.0],
+        ], dtype=np.float32)
+
+        return self.compute_from_points(pts_src, pts_dst)
 
     def pixel_to_pitch(self, u: float, v: float) -> Tuple[float, float]:
         """
@@ -129,11 +212,9 @@ class PitchHomography:
         box_y_bot = box_y_top + PENALTY_AREA_WIDTH_M
 
         if target_goal_x > 52.5:
-            # Defending goal at X = 105.0
             box_x_min = self.pitch_length - PENALTY_AREA_LENGTH_M
             return (box_x_min <= x_m <= self.pitch_length) and (box_y_top <= y_m <= box_y_bot)
         else:
-            # Defending goal at X = 0.0
             box_x_max = PENALTY_AREA_LENGTH_M
             return (0.0 <= x_m <= box_x_max) and (box_y_top <= y_m <= box_y_bot)
 
