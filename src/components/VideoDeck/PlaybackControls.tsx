@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppPhase } from '../../types/var';
 import {
   Play,
   Pause,
@@ -10,18 +11,20 @@ import {
   Crosshair,
   Flame,
   RotateCcw,
+  Flag,
 } from 'lucide-react';
 
 interface PlaybackControlsProps {
   currentFrame: number;
   totalFrames: number;
   isPlaying: boolean;
-  playbackRate: number; // 0.1, 0.25, 0.5, 1.0, 2.0
+  playbackRate: number;
   loopA: number | null;
   loopB: number | null;
   isLooping: boolean;
   kickFrame: number;
   incidentFrame: number;
+  appPhases?: AppPhase[];
   onTogglePlay: () => void;
   onStepFrame: (delta: number) => void;
   onSeekFrame: (frame: number) => void;
@@ -44,6 +47,7 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
   isLooping,
   kickFrame,
   incidentFrame,
+  appPhases = [],
   onTogglePlay,
   onStepFrame,
   onSeekFrame,
@@ -55,7 +59,6 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
   onFreezeKickPoint,
   onJumpIncident,
 }) => {
-  // Format frame number to timecode MM:SS:FF (at 60fps)
   const formatTimecode = (frame: number) => {
     const fps = 60;
     const totalSecs = Math.floor(frame / fps);
@@ -68,8 +71,8 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
   const speedOptions = [0.1, 0.25, 0.5, 1.0, 2.0];
 
   return (
-    <div className="bg-[#111827] border border-[#1F2937] rounded-lg p-3 space-y-2 select-none shadow-xl">
-      {/* 1. Scrub Timeline Bar with Keypoint Markers */}
+    <div className="bg-[#111827] border border-[#1F2937] rounded-lg p-3 space-y-2.5 select-none shadow-xl">
+      {/* 1. Scrub Timeline Bar with Keypoint Markers & APP Phase Indicators */}
       <div className="relative pt-1 pb-1">
         <input
           type="range"
@@ -77,7 +80,7 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
           max={totalFrames - 1}
           value={currentFrame}
           onChange={(e) => onSeekFrame(Number(e.target.value))}
-          className="w-full h-2 bg-[#1F2937] rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition"
+          className="w-full h-2.5 bg-[#1F2937] rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400 transition"
         />
 
         {/* Kick Point Marker */}
@@ -85,7 +88,7 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
           title={`Kick Point: Frame ${kickFrame}`}
           onClick={onFreezeKickPoint}
           style={{ left: `${(kickFrame / totalFrames) * 100}%` }}
-          className="absolute -top-1 w-2 h-4 bg-amber-400 rounded-sm cursor-pointer transform -translate-x-1/2 hover:scale-125 transition-transform"
+          className="absolute -top-1 w-2.5 h-4.5 bg-amber-400 rounded-sm cursor-pointer transform -translate-x-1/2 hover:scale-125 transition-transform shadow"
         />
 
         {/* Incident Point Marker */}
@@ -93,7 +96,7 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
           title={`Incident Contact: Frame ${incidentFrame}`}
           onClick={onJumpIncident}
           style={{ left: `${(incidentFrame / totalFrames) * 100}%` }}
-          className="absolute -top-1 w-2 h-4 bg-red-500 rounded-sm cursor-pointer transform -translate-x-1/2 hover:scale-125 transition-transform"
+          className="absolute -top-1 w-2.5 h-4.5 bg-red-500 rounded-sm cursor-pointer transform -translate-x-1/2 hover:scale-125 transition-transform shadow"
         />
 
         {/* Loop A & B visual indicators */}
@@ -101,17 +104,51 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
           <div
             title={`Loop Point A: Frame ${loopA}`}
             style={{ left: `${(loopA / totalFrames) * 100}%` }}
-            className="absolute top-2 w-1.5 h-3 bg-sky-400 transform -translate-x-1/2"
+            className="absolute top-2.5 w-1.5 h-3 bg-sky-400 transform -translate-x-1/2"
           />
         )}
         {loopB !== null && (
           <div
             title={`Loop Point B: Frame ${loopB}`}
             style={{ left: `${(loopB / totalFrames) * 100}%` }}
-            className="absolute top-2 w-1.5 h-3 bg-sky-400 transform -translate-x-1/2"
+            className="absolute top-2.5 w-1.5 h-3 bg-sky-400 transform -translate-x-1/2"
           />
         )}
       </div>
+
+      {/* Part B.4: Attacking Possession Phase (APP) Markers Row */}
+      {appPhases.length > 0 && (
+        <div className="flex items-center justify-between gap-1 overflow-x-auto py-1 border-t border-b border-[#1F2937]/60 text-[10px] font-mono-telemetry">
+          <div className="flex items-center space-x-1 text-gray-400 uppercase font-bold shrink-0">
+            <Flag className="w-3 h-3 text-blue-400" />
+            <span>APP Phases:</span>
+          </div>
+          <div className="flex items-center gap-1.5 flex-1 justify-end">
+            {appPhases.map((phase) => {
+              const isPassed = currentFrame >= phase.frame;
+              return (
+                <button
+                  key={phase.id}
+                  onClick={() => onSeekFrame(phase.frame)}
+                  title={`${phase.description} (Frame ${phase.frame})`}
+                  className={`px-2 py-0.5 rounded flex items-center gap-1 transition ${
+                    isPassed
+                      ? 'bg-blue-950 text-blue-200 border border-blue-700'
+                      : 'bg-[#0B0F19] text-gray-400 border border-[#1F2937] hover:border-gray-500'
+                  }`}
+                >
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ backgroundColor: phase.badgeColor }}
+                  />
+                  <span className="truncate max-w-[120px]">{phase.name}</span>
+                  <span className="text-[9px] text-gray-500">({phase.frame}f)</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 2. Main Control Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -130,7 +167,6 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
 
         {/* Center: Playback Stepping & Shuttle Controls */}
         <div className="flex items-center space-x-1">
-          {/* -10f */}
           <button
             onClick={() => onStepFrame(-10)}
             title="Step -10 frames"
@@ -139,7 +175,6 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
             <ChevronsLeft className="w-4 h-4" />
           </button>
 
-          {/* -1f */}
           <button
             onClick={() => onStepFrame(-1)}
             title="Step -1 frame (previous frame)"
@@ -148,7 +183,6 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
             <ChevronLeft className="w-3.5 h-3.5" /> -1f
           </button>
 
-          {/* Play / Pause Primary Button */}
           <button
             onClick={onTogglePlay}
             className={`px-4 py-1.5 rounded font-bold transition flex items-center gap-1.5 shadow ${
@@ -168,7 +202,6 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
             )}
           </button>
 
-          {/* +1f */}
           <button
             onClick={() => onStepFrame(1)}
             title="Step +1 frame (next frame)"
@@ -177,7 +210,6 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
             +1f <ChevronRight className="w-3.5 h-3.5" />
           </button>
 
-          {/* +10f */}
           <button
             onClick={() => onStepFrame(10)}
             title="Step +10 frames"
@@ -205,7 +237,7 @@ export const PlaybackControls: React.FC<PlaybackControlsProps> = ({
           ))}
         </div>
 
-        {/* Right: Quick Jump Actions (Freeze Kick Point / Loop A-B) */}
+        {/* Right: Quick Jump Actions */}
         <div className="flex items-center space-x-1.5">
           <button
             onClick={onFreezeKickPoint}

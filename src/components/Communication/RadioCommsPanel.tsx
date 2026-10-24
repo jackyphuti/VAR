@@ -5,6 +5,7 @@ import {
   RecommendedAction,
   MatchRestart,
   DisciplinaryCard,
+  MistakenIdentityState,
 } from '../../types/var';
 import { playRadioChirp, playRadioSquelch } from '../../utils/audio';
 import { Radio, Mic, Copy, Check, Volume2 } from 'lucide-react';
@@ -17,6 +18,7 @@ interface RadioCommsPanelProps {
   sanction: DisciplinaryCard;
   saotDeltaCm?: number;
   matchClock: string;
+  mistakenIdentityState?: MistakenIdentityState;
 }
 
 export const RadioCommsPanel: React.FC<RadioCommsPanelProps> = ({
@@ -27,6 +29,7 @@ export const RadioCommsPanel: React.FC<RadioCommsPanelProps> = ({
   sanction,
   saotDeltaCm = 0,
   matchClock,
+  mistakenIdentityState,
 }) => {
   const [copied, setCopied] = useState(false);
   const [isTransmitting, setIsTransmitting] = useState(false);
@@ -55,7 +58,12 @@ export const RadioCommsPanel: React.FC<RadioCommsPanelProps> = ({
       return `[${matchClock}] VAR to Referee: "Delay, delay, checking potential Direct Red Card for Serious Foul Play / DOGSO. Recommend an On-Field Review at the Referee Review Area. Point of contact is above the ankle with studs exposed and excessive force."`;
     }
 
-    return `[${matchClock}] VAR to Referee: "Checking potential mistaken identity. The center referee cautioned player #4, but the foul was committed by player #6. Recommend factual correction: Rescind yellow card for #4, issue yellow card to #6."`;
+    // Part A.4: Dynamic Mistaken Identity Script
+    const wrongNum = mistakenIdentityState?.incorrectPlayerNumber || 4;
+    const rightNum = mistakenIdentityState?.correctPlayerNumber || 6;
+    const card = mistakenIdentityState?.sanctionToTransfer || 'YELLOW';
+
+    return `[${matchClock}] VAR to Referee: "Checking potential mistaken identity. The center referee sanctioned player #${wrongNum}, but multi-angle video confirms the contact offense was committed by player #${rightNum}. Recommend factual correction: Rescind ${card.toLowerCase()} card for #${wrongNum}, issue ${card.toLowerCase()} card to #${rightNum}."`;
   };
 
   const script = generateRadioScript();
@@ -69,7 +77,6 @@ export const RadioCommsPanel: React.FC<RadioCommsPanelProps> = ({
   const handlePushToTalkDown = () => {
     setIsTransmitting(true);
     playRadioChirp();
-    // Optional Speech Synthesis
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(script.replace(/\[\d+:\d+\] VAR to Referee: /g, ''));

@@ -26,6 +26,7 @@ export const CameraFeedCanvas: React.FC<CameraFeedCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [activeDrag, setActiveDrag] = useState<'defender' | 'attacker' | null>(null);
+  const [dragTooltip, setDragTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -33,7 +34,6 @@ export const CameraFeedCanvas: React.FC<CameraFeedCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Handle high DPI display
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
     const width = rect.width;
@@ -48,34 +48,80 @@ export const CameraFeedCanvas: React.FC<CameraFeedCanvasProps> = ({
     ctx.scale(dpr, dpr);
 
     if (isCustomVideo && videoElement && videoElement.readyState >= 2) {
-      // Draw uploaded video frame
-      ctx.drawImage(videoElement, 0, 0, width, height);
+      renderCustomVideoFeed(ctx, cameraId, videoElement, width, height);
+      // Overlay SAOT lines and radar on top of custom video
+      if (saotState.show3DLines) {
+        const persp = CAMERA_PERSPECTIVES[cameraId];
+        renderSaot3DLines(ctx, persp, saotState, width, height);
+        renderSaotCrosshairs(ctx, persp, saotState, width, height);
+      }
     } else {
-      // Draw simulated 3D football feed
       renderSimulatedPitchScene(ctx, cameraId, scenarioId, frameIndex, width, height, saotState);
     }
 
-    ctx.restore();
-  }, [cameraId, scenarioId, frameIndex, saotState, isCustomVideo, videoElement]);
+    // Render Drag Tooltip if active
+    if (dragTooltip) {
+      ctx.save();
+      ctx.font = '11px monospace';
+      const tw = ctx.measureText(dragTooltip.text).width;
+      ctx.fillStyle = 'rgba(11, 15, 25, 0.9)';
+      ctx.strokeStyle = '#38BDF8';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(dragTooltip.x - tw / 2 - 8, dragTooltip.y - 32, tw + 16, 22, 4);
+      ctx.fill();
+      ctx.stroke();
 
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(dragTooltip.text, dragTooltip.x, dragTooltip.y - 21);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }, [cameraId, scenarioId, frameIndex, saotState, isCustomVideo, videoElement, dragTooltip, isMaximized]);
+
+  // Pointer interactions for True Inverse Projection unproject()
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!saotState.passFrameLocked || !canvasRef.current || !onUpdateSaotCrosshair) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Determine if closer to defender or attacker crosshair
     const persp = CAMERA_PERSPECTIVES[cameraId];
-    const defProj = persp.project(saotState.defender.pitchX, saotState.defender.pitchY, 1.2, rect.width, rect.height);
-    const attProj = persp.project(saotState.attacker.pitchX, saotState.attacker.pitchY, 1.2, rect.width, rect.height);
+    const defProj = persp.project(
+      saotState.defender.pitchX,
+      saotState.defender.pitchY,
+      saotState.defender.heightAboveGrassM || 1.35,
+      rect.width,
+      rect.height
+    );
+    const attProj = persp.project(
+      saotState.attacker.pitchX,
+      saotState.attacker.pitchY,
+      saotState.attacker.heightAboveGrassM || 1.45,
+      rect.width,
+      rect.height
+    );
 
     const distDef = Math.hypot(x - defProj.x, y - defProj.y);
     const distAtt = Math.hypot(x - attProj.x, y - attProj.y);
 
-    if (distDef < 35) {
+    if (distDef < 40) {
       setActiveDrag('defender');
-    } else if (distAtt < 35) {
+      setDragTooltip({
+        x,
+        y,
+        text: `DEF: X=${saotState.defender.pitchX.toFixed(2)}m, Y=${saotState.defender.pitchY.toFixed(2)}m`,
+      });
+    } else if (distAtt < 40) {
       setActiveDrag('attacker');
+      setDragTooltip({
+        x,
+        y,
+        text: `ATT: X=${saotState.attacker.pitchX.toFixed(2)}m, Y=${saotState.attacker.pitchY.toFixed(2)}m`,
+      });
     }
   };
 
@@ -83,16 +129,28 @@ export const CameraFeedCanvas: React.FC<CameraFeedCanvasProps> = ({
     if (!activeDrag || !canvasRef.current || !onUpdateSaotCrosshair) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    // Map screen X back approximately to pitch meters (defense half 70m to 105m)
-    const normX = Math.min(1.0, Math.max(0.0, x / rect.width));
-    const newPitchX = 70.0 + normX * 35.0;
-    const newPitchY = 34.0;
+    const y = e.clientY - rect.top;
 
-    onUpdateSaotCrosshair(activeDrag, newPitchX, newPitchY);
+    const persp = CAMERA_PERSPECTIVES[cameraId];
+    const heightM =
+      activeDrag === 'defender'
+        ? saotState.defender.heightAboveGrassM || 1.35
+        : saotState.attacker.heightAboveGrassM || 1.45;
+
+    // Algebraic true inverse projection
+    const unproj = persp.unproject(x, y, heightM, rect.width, rect.height);
+    onUpdateSaotCrosshair(activeDrag, unproj.pitchX, unproj.pitchY);
+
+    setDragTooltip({
+      x,
+      y,
+      text: `${activeDrag === 'defender' ? 'DEF' : 'ATT'}: X=${unproj.pitchX.toFixed(3)}m, Y=${unproj.pitchY.toFixed(3)}m`,
+    });
   };
 
   const handlePointerUp = () => {
     setActiveDrag(null);
+    setDragTooltip(null);
   };
 
   return (
@@ -104,9 +162,50 @@ export const CameraFeedCanvas: React.FC<CameraFeedCanvasProps> = ({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
     />
   );
 };
+
+/**
+ * Handles custom video rendering with simulated camera viewports for CAM-02, 03, 04
+ */
+function renderCustomVideoFeed(
+  ctx: CanvasRenderingContext2D,
+  camId: CameraId,
+  video: HTMLVideoElement,
+  w: number,
+  h: number
+) {
+  const vw = video.videoWidth || 1920;
+  const vh = video.videoHeight || 1080;
+
+  if (camId === 'main_wide') {
+    // CAM-01: Full uncropped frame
+    ctx.drawImage(video, 0, 0, vw, vh, 0, 0, w, h);
+  } else if (camId === 'cam_16m') {
+    // CAM-02: Calibrated 16m zoom crop
+    const sx = vw * 0.25;
+    const sy = vh * 0.15;
+    const sw = vw * 0.75;
+    const sh = vh * 0.85;
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+  } else if (camId === 'behind_goal') {
+    // CAM-03: Goalmouth close-up crop
+    const sx = vw * 0.45;
+    const sy = vh * 0.25;
+    const sw = vw * 0.55;
+    const sh = vh * 0.75;
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+  } else {
+    // CAM-04: High tactical overhead view crop
+    const sx = vw * 0.15;
+    const sy = vh * 0.05;
+    const sw = vw * 0.85;
+    const sh = vh * 0.9;
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+  }
+}
 
 /**
  * Renders the simulated football pitch scene with turf stripes, lines, players, ball, and SAOT 3D lines.
@@ -127,7 +226,7 @@ function renderSimulatedPitchScene(
   ctx.fillStyle = '#1A3F22';
   ctx.fillRect(0, 0, w, h);
 
-  // Grass stripes pattern (5m mowing stripes along length)
+  // Grass stripes pattern (5.5m mowing stripes)
   for (let sx = 65; sx <= 105; sx += 5.5) {
     const isDark = Math.floor(sx / 5.5) % 2 === 0;
     ctx.fillStyle = isDark ? '#1E4A28' : '#183C20';
@@ -173,7 +272,7 @@ function renderSimulatedPitchScene(
   ctx.arc(penSpot.x, penSpot.y, 3 * penSpot.scale, 0, Math.PI * 2);
   ctx.fill();
 
-  // Goal Frame (X=105, Y=30.34 to 37.66, height 2.44m)
+  // Goal Frame
   drawGoalFrame(ctx, persp, w, h);
 
   // 3. Render SAOT 3D Offside Lines on Turf (if active)
@@ -182,9 +281,7 @@ function renderSimulatedPitchScene(
   }
 
   // 4. Draw Shadows and Players
-  // Sort players by depth (pitchY)
   const sortedPlayers = [...state.players].sort((a, b) => a.pitchY - b.pitchY);
-
   sortedPlayers.forEach((player) => {
     renderPlayer(ctx, persp, player, w, h);
   });
@@ -222,7 +319,6 @@ function drawPitchSegment(
 }
 
 function drawGoalFrame(ctx: CanvasRenderingContext2D, persp: any, w: number, h: number) {
-  // Goal posts at X=105, Y=30.34 and Y=37.66, height 2.44m
   const post1Base = persp.project(105, 30.34, 0, w, h);
   const post1Top = persp.project(105, 30.34, 2.44, w, h);
   const post2Base = persp.project(105, 37.66, 0, w, h);
@@ -231,12 +327,9 @@ function drawGoalFrame(ctx: CanvasRenderingContext2D, persp: any, w: number, h: 
   ctx.strokeStyle = '#FFFFFF';
   ctx.lineWidth = 3.5;
   ctx.beginPath();
-  // Left post
   ctx.moveTo(post1Base.x, post1Base.y);
   ctx.lineTo(post1Top.x, post1Top.y);
-  // Crossbar
   ctx.lineTo(post2Top.x, post2Top.y);
-  // Right post
   ctx.lineTo(post2Base.x, post2Base.y);
   ctx.stroke();
 
@@ -267,6 +360,8 @@ function renderPlayer(ctx: CanvasRenderingContext2D, persp: any, player: any, w:
 
   const isFallen = player.actionState === 'FALLEN';
   const isLunge = player.actionState === 'LUNGING_STUDS_UP';
+  const isArmExtended = player.actionState === 'ARM_EXTENDED';
+  const isHeading = player.actionState === 'HEADING';
 
   // Kit colors
   let primaryKit = '#3B82F6'; // Blue defenders
@@ -313,27 +408,109 @@ function renderPlayer(ctx: CanvasRenderingContext2D, persp: any, player: any, w:
     ctx.beginPath();
     ctx.arc(playerH * 0.62, -playerH * 0.12, 3.5 * scale, 0, Math.PI * 2);
     ctx.fill();
-  } else {
-    // Normal standing/running player
+  } else if (isArmExtended) {
+    // Defender airborne with right arm horizontally extended (Handball Law 12)
+    // Elevation lift
+    const liftY = -playerH * 0.25;
+
     // Torso
     ctx.fillStyle = primaryKit;
-    ctx.fillRect(-playerH * 0.18, -playerH * 0.75, playerH * 0.36, playerH * 0.45);
+    ctx.fillRect(-playerH * 0.18, -playerH * 0.75 + liftY, playerH * 0.36, playerH * 0.45);
 
     // Shorts
     ctx.fillStyle = shortKit;
-    ctx.fillRect(-playerH * 0.16, -playerH * 0.35, playerH * 0.32, playerH * 0.2);
+    ctx.fillRect(-playerH * 0.16, -playerH * 0.35 + liftY, playerH * 0.32, playerH * 0.2);
+
+    // Jumping legs
+    ctx.fillStyle = '#FBBF24';
+    ctx.fillRect(-playerH * 0.14, -playerH * 0.18 + liftY, playerH * 0.1, playerH * 0.18);
+    ctx.fillRect(playerH * 0.04, -playerH * 0.18 + liftY, playerH * 0.1, playerH * 0.18);
+
+    // Head
+    ctx.beginPath();
+    ctx.arc(0, -playerH * 0.86 + liftY, playerH * 0.13, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Right Arm horizontally extended 90 degrees outward (Unnatural Silhouette)
+    ctx.strokeStyle = primaryKit;
+    ctx.lineWidth = 4 * scale;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(playerH * 0.15, -playerH * 0.68 + liftY);
+    ctx.lineTo(playerH * 0.75, -playerH * 0.68 + liftY); // Extended outward
+    ctx.stroke();
+
+    // Hand extremity with glowing impact ring
+    const handX = playerH * 0.76;
+    const handY = -playerH * 0.68 + liftY;
+    ctx.fillStyle = '#FBBF24';
+    ctx.beginPath();
+    ctx.arc(handX, handY, 3.5 * scale, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Glowing impact ring
+    ctx.strokeStyle = '#EF4444';
+    ctx.lineWidth = 2 * scale;
+    ctx.beginPath();
+    ctx.arc(handX, handY, 7 * scale, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.4)';
+    ctx.beginPath();
+    ctx.arc(handX, handY, 11 * scale, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Squad number
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold ${Math.max(8, Math.floor(playerH * 0.22))}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${player.number}`, 0, -playerH * 0.55 + liftY);
+  } else if (isHeading) {
+    // Attacker leaning forward mid-air heading ball
+    const liftY = -playerH * 0.2;
+    ctx.rotate(0.2); // Forward thrust
+
+    // Torso
+    ctx.fillStyle = primaryKit;
+    ctx.fillRect(-playerH * 0.18, -playerH * 0.75 + liftY, playerH * 0.36, playerH * 0.45);
+
+    // Shorts
+    ctx.fillStyle = shortKit;
+    ctx.fillRect(-playerH * 0.16, -playerH * 0.35 + liftY, playerH * 0.32, playerH * 0.2);
 
     // Legs
+    ctx.fillStyle = '#FBBF24';
+    ctx.fillRect(-playerH * 0.14, -playerH * 0.18 + liftY, playerH * 0.1, playerH * 0.18);
+    ctx.fillRect(playerH * 0.04, -playerH * 0.18 + liftY, playerH * 0.1, playerH * 0.18);
+
+    // Head thrust forward towards ball
+    ctx.beginPath();
+    ctx.arc(playerH * 0.12, -playerH * 0.88 + liftY, playerH * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Squad number
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `bold ${Math.max(8, Math.floor(playerH * 0.22))}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${player.number}`, 0, -playerH * 0.55 + liftY);
+  } else {
+    // Normal standing/running player
+    ctx.fillStyle = primaryKit;
+    ctx.fillRect(-playerH * 0.18, -playerH * 0.75, playerH * 0.36, playerH * 0.45);
+
+    ctx.fillStyle = shortKit;
+    ctx.fillRect(-playerH * 0.16, -playerH * 0.35, playerH * 0.32, playerH * 0.2);
+
     ctx.fillStyle = '#FBBF24';
     ctx.fillRect(-playerH * 0.14, -playerH * 0.18, playerH * 0.1, playerH * 0.18);
     ctx.fillRect(playerH * 0.04, -playerH * 0.18, playerH * 0.1, playerH * 0.18);
 
-    // Head
     ctx.beginPath();
     ctx.arc(0, -playerH * 0.86, playerH * 0.13, 0, Math.PI * 2);
     ctx.fill();
 
-    // Squad Number
     ctx.fillStyle = '#FFFFFF';
     ctx.font = `bold ${Math.max(8, Math.floor(playerH * 0.22))}px monospace`;
     ctx.textAlign = 'center';
@@ -350,7 +527,6 @@ function renderBall(ctx: CanvasRenderingContext2D, persp: any, ball: any, w: num
   const scale = airPos.scale;
   const radius = Math.max(3.5, 5.5 * scale);
 
-  // Ground shadow
   const shadowDist = Math.hypot(groundPos.x - airPos.x, groundPos.y - airPos.y);
   const shadowAlpha = Math.max(0.1, 0.45 - shadowDist * 0.005);
   ctx.fillStyle = `rgba(0, 0, 0, ${shadowAlpha})`;
@@ -358,7 +534,6 @@ function renderBall(ctx: CanvasRenderingContext2D, persp: any, ball: any, w: num
   ctx.ellipse(groundPos.x, groundPos.y, radius * 1.2, radius * 0.6, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Ball sphere
   ctx.fillStyle = '#FFFFFF';
   ctx.beginPath();
   ctx.arc(airPos.x, airPos.y, radius, 0, Math.PI * 2);
@@ -367,7 +542,6 @@ function renderBall(ctx: CanvasRenderingContext2D, persp: any, ball: any, w: num
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // Pentagons on ball
   ctx.fillStyle = '#111827';
   ctx.beginPath();
   ctx.arc(airPos.x, airPos.y, radius * 0.45, 0, Math.PI * 2);
@@ -378,18 +552,16 @@ function renderSaot3DLines(ctx: CanvasRenderingContext2D, persp: any, saot: Saot
   const defX = saot.defender.pitchX;
   const attX = saot.attacker.pitchX;
 
-  // 1. Defender 3D Offside Line across pitch grass (Blue / Cyan)
   const defP1 = persp.project(defX, 0, 0, w, h);
   const defP2 = persp.project(defX, 68, 0, w, h);
 
-  ctx.strokeStyle = '#0284C7'; // Blue
+  ctx.strokeStyle = '#0284C7';
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(defP1.x, defP1.y);
   ctx.lineTo(defP2.x, defP2.y);
   ctx.stroke();
 
-  // 2. Attacker 3D Offside Line across pitch grass (Red or Emerald)
   const attP1 = persp.project(attX, 0, 0, w, h);
   const attP2 = persp.project(attX, 68, 0, w, h);
 
@@ -403,7 +575,6 @@ function renderSaot3DLines(ctx: CanvasRenderingContext2D, persp: any, saot: Saot
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Shaded delta zone between lines
   ctx.fillStyle = isOffside ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.12)';
   ctx.beginPath();
   ctx.moveTo(defP1.x, defP1.y);
@@ -415,21 +586,18 @@ function renderSaot3DLines(ctx: CanvasRenderingContext2D, persp: any, saot: Saot
 }
 
 function renderSaotCrosshairs(ctx: CanvasRenderingContext2D, persp: any, saot: SaotState, w: number, h: number) {
-  // Defender Vertical Drop Line (3D Pole from grass to body extremity)
   const defGrass = persp.project(saot.defender.pitchX, saot.defender.pitchY, 0, w, h);
   const defBody = persp.project(saot.defender.pitchX, saot.defender.pitchY, saot.defender.heightAboveGrassM || 1.35, w, h);
 
-  ctx.strokeStyle = '#38BDF8'; // Sky blue
+  ctx.strokeStyle = '#38BDF8';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(defGrass.x, defGrass.y);
   ctx.lineTo(defBody.x, defBody.y);
   ctx.stroke();
 
-  // Defender Crosshair Target
-  drawCrosshair(ctx, defBody.x, defBody.y, '#38BDF8', 'DEFENDER (2ND LAST)');
+  drawCrosshair(ctx, defBody.x, defBody.y, '#38BDF8', `DEF (${saot.defender.pitchX.toFixed(2)}m)`);
 
-  // Attacker Vertical Drop Line
   const attGrass = persp.project(saot.attacker.pitchX, saot.attacker.pitchY, 0, w, h);
   const attBody = persp.project(saot.attacker.pitchX, saot.attacker.pitchY, saot.attacker.heightAboveGrassM || 1.45, w, h);
 
@@ -441,8 +609,7 @@ function renderSaotCrosshairs(ctx: CanvasRenderingContext2D, persp: any, saot: S
   ctx.lineTo(attBody.x, attBody.y);
   ctx.stroke();
 
-  // Attacker Crosshair Target
-  drawCrosshair(ctx, attBody.x, attBody.y, attColor, `ATTACKER (${saot.deltaCm > 0 ? '+' : ''}${saot.deltaCm.toFixed(1)}cm)`);
+  drawCrosshair(ctx, attBody.x, attBody.y, attColor, `ATT (${saot.deltaCm > 0 ? '+' : ''}${saot.deltaCm.toFixed(1)}cm)`);
 }
 
 function drawCrosshair(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, label: string) {
@@ -451,17 +618,14 @@ function drawCrosshair(ctx: CanvasRenderingContext2D, x: number, y: number, colo
   ctx.fillStyle = color;
   ctx.lineWidth = 2;
 
-  // Outer circle
   ctx.beginPath();
   ctx.arc(x, y, 9, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Center dot
   ctx.beginPath();
   ctx.arc(x, y, 2.5, 0, Math.PI * 2);
   ctx.fill();
 
-  // Cross lines
   ctx.beginPath();
   ctx.moveTo(x - 14, y);
   ctx.lineTo(x - 9, y);
@@ -473,7 +637,6 @@ function drawCrosshair(ctx: CanvasRenderingContext2D, x: number, y: number, colo
   ctx.lineTo(x, y + 14);
   ctx.stroke();
 
-  // Label tag
   ctx.font = '10px monospace';
   ctx.fillStyle = 'rgba(17, 24, 39, 0.85)';
   const tw = ctx.measureText(label).width;
@@ -492,14 +655,12 @@ function renderRadarMinimap(ctx: CanvasRenderingContext2D, state: any, saot: Sao
   const mx = w - mapW - 16;
   const my = h - mapH - 16;
 
-  // Background
   ctx.fillStyle = 'rgba(11, 15, 25, 0.88)';
   ctx.fillRect(mx, my, mapW, mapH);
   ctx.strokeStyle = '#1F2937';
   ctx.lineWidth = 1;
   ctx.strokeRect(mx, my, mapW, mapH);
 
-  // Pitch outline (half pitch 52.5m to 105m)
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
   const pitchLeft = mx + 10;
   const pitchTop = my + 10;
@@ -507,11 +668,9 @@ function renderRadarMinimap(ctx: CanvasRenderingContext2D, state: any, saot: Sao
   const pitchH = mapH - 20;
   ctx.strokeRect(pitchLeft, pitchTop, pitchW, pitchH);
 
-  // Scale: 52.5m -> pitchW, 68m -> pitchH
   const toMapX = (px: number) => pitchLeft + ((px - 52.5) / 52.5) * pitchW;
   const toMapY = (py: number) => pitchTop + (py / 68.0) * pitchH;
 
-  // Draw 2nd-last defender line
   const defMapX = toMapX(saot.defender.pitchX);
   ctx.strokeStyle = '#0284C7';
   ctx.lineWidth = 1.5;
@@ -520,7 +679,6 @@ function renderRadarMinimap(ctx: CanvasRenderingContext2D, state: any, saot: Sao
   ctx.lineTo(defMapX, pitchTop + pitchH);
   ctx.stroke();
 
-  // Draw attacker line
   const attMapX = toMapX(saot.attacker.pitchX);
   ctx.strokeStyle = saot.deltaCm > 0 ? '#EF4444' : '#10B981';
   ctx.beginPath();
@@ -528,7 +686,6 @@ function renderRadarMinimap(ctx: CanvasRenderingContext2D, state: any, saot: Sao
   ctx.lineTo(attMapX, pitchTop + pitchH);
   ctx.stroke();
 
-  // Draw players on minimap
   state.players.forEach((p: any) => {
     ctx.fillStyle = p.team === 'ATTACKER' ? '#EF4444' : p.team === 'DEFENDER' ? '#38BDF8' : '#F59E0B';
     ctx.beginPath();
@@ -536,7 +693,6 @@ function renderRadarMinimap(ctx: CanvasRenderingContext2D, state: any, saot: Sao
     ctx.fill();
   });
 
-  // Radar title
   ctx.fillStyle = '#9CA3AF';
   ctx.font = '8px monospace';
   ctx.fillText('2D SAOT RADAR', mx + 8, my + 8);

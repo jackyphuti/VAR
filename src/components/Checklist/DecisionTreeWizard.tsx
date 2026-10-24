@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   VarCategory,
   RecommendedAction,
@@ -7,6 +7,7 @@ import {
   DogsoState,
   SfpState,
   HandballState,
+  MistakenIdentityState,
 } from '../../types/var';
 import { DogsoCalculator } from './DogsoCalculator';
 import { SeriousFoulMatrix } from './SeriousFoulMatrix';
@@ -20,6 +21,8 @@ import {
   CheckCircle2,
   Tv,
   ArrowRight,
+  Save,
+  Check,
 } from 'lucide-react';
 
 interface DecisionTreeWizardProps {
@@ -37,8 +40,11 @@ interface DecisionTreeWizardProps {
   onChangeSfp: (updates: Partial<SfpState>) => void;
   handballState: HandballState;
   onChangeHandball: (updates: Partial<HandballState>) => void;
+  mistakenIdentityState: MistakenIdentityState;
+  onChangeMistakenIdentity: (updates: Partial<MistakenIdentityState>) => void;
   isClearAndObvious: boolean;
   onToggleClearAndObvious: () => void;
+  onCommitDecision: () => void;
 }
 
 export const DecisionTreeWizard: React.FC<DecisionTreeWizardProps> = ({
@@ -56,8 +62,11 @@ export const DecisionTreeWizard: React.FC<DecisionTreeWizardProps> = ({
   onChangeSfp,
   handballState,
   onChangeHandball,
+  mistakenIdentityState,
+  onChangeMistakenIdentity,
   isClearAndObvious,
   onToggleClearAndObvious,
+  onCommitDecision,
 }) => {
   const categories: { id: VarCategory; label: string; icon: React.ReactNode }[] = [
     { id: 'GOAL_NO_GOAL', label: '1. Goal / No Goal', icon: <Goal className="w-4 h-4" /> },
@@ -65,6 +74,37 @@ export const DecisionTreeWizard: React.FC<DecisionTreeWizardProps> = ({
     { id: 'DIRECT_RED_CARD', label: '3. Direct Red Card', icon: <ShieldX className="w-4 h-4" /> },
     { id: 'MISTAKEN_IDENTITY', label: '4. Mistaken Identity', icon: <Users className="w-4 h-4" /> },
   ];
+
+  // Auto-sync decision outcomes based on active category matrices (Part A.4)
+  useEffect(() => {
+    if (category === 'PENALTY_NO_PENALTY' || category === 'DIRECT_RED_CARD') {
+      const isSFP =
+        sfpState.endangeringSafety ||
+        (sfpState.excessiveForce && (sfpState.pointOfContact === 'ABOVE_ANKLE_SHIN' || sfpState.pointOfContact === 'KNEE')) ||
+        (sfpState.studsExposed && sfpState.speedIntensity === 'HIGH_LUNGE');
+
+      const isDogso =
+        (dogsoState.distanceToGoal === 'CLOSE' || dogsoState.distanceToGoal === 'MEDIUM') &&
+        dogsoState.directionOfPlay === 'TOWARDS_GOAL' &&
+        dogsoState.likelihoodOfControl &&
+        (dogsoState.defendersCount === 'NONE_EXCEPT_GK' || dogsoState.defendersCount === 'ONE_RECOVERING');
+
+      if (isSFP) {
+        onSelectSanction('RED');
+        onSelectAction('ON_FIELD_REVIEW');
+        onSelectRestart(dogsoState.insidePenaltyArea ? 'PENALTY_KICK' : 'DIRECT_FREE_KICK');
+      } else if (isDogso) {
+        if (dogsoState.insidePenaltyArea && dogsoState.genuineAttemptToPlayBall) {
+          onSelectSanction('YELLOW'); // Double Jeopardy downgrade
+          onSelectRestart('PENALTY_KICK');
+        } else {
+          onSelectSanction('RED');
+          onSelectRestart(dogsoState.insidePenaltyArea ? 'PENALTY_KICK' : 'DIRECT_FREE_KICK');
+        }
+        onSelectAction('ON_FIELD_REVIEW');
+      }
+    }
+  }, [sfpState, dogsoState, category]);
 
   return (
     <div className="bg-[#111827] border border-[#1F2937] rounded-lg p-3 space-y-3 shadow-xl">
@@ -154,15 +194,71 @@ export const DecisionTreeWizard: React.FC<DecisionTreeWizardProps> = ({
       )}
 
       {category === 'MISTAKEN_IDENTITY' && (
-        <div className="bg-[#0B0F19] p-3 rounded-lg border border-[#1F2937] space-y-2 text-xs">
-          <div className="text-xs font-bold text-amber-400">Law 12: Mistaken Identity Rectification</div>
-          <p className="text-gray-300 text-[11px]">
-            Center referee sanctioned player #4 instead of player #6 who actually committed the contact offense.
-          </p>
-          <div className="flex items-center space-x-2 text-xs">
-            <span className="text-red-400 font-semibold">Rescind Card: Player #4</span>
-            <ArrowRight className="w-3.5 h-3.5 text-gray-400" />
-            <span className="text-emerald-400 font-semibold">Issue Card: Player #6</span>
+        /* Part A.4: Editable Mistaken Identity Inputs */
+        <div className="bg-[#0B0F19] p-3 rounded-lg border border-[#1F2937] space-y-2.5 text-xs">
+          <div className="text-xs font-bold text-amber-400 flex items-center justify-between">
+            <span>Law 12: Mistaken Identity Rectification</span>
+            <span className="text-[10px] text-gray-400">Interactive Inputs</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-red-400 block mb-0.5 font-semibold">
+                Sanctioned Wrong Player #:
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={99}
+                value={mistakenIdentityState.incorrectPlayerNumber}
+                onChange={(e) =>
+                  onChangeMistakenIdentity({ incorrectPlayerNumber: Number(e.target.value) })
+                }
+                className="w-full bg-[#1F2937] border border-[#374151] rounded px-2 py-1 text-white font-mono-telemetry font-bold"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] text-emerald-400 block mb-0.5 font-semibold">
+                Actual Offending Player #:
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={99}
+                value={mistakenIdentityState.correctPlayerNumber}
+                onChange={(e) =>
+                  onChangeMistakenIdentity({ correctPlayerNumber: Number(e.target.value) })
+                }
+                className="w-full bg-[#1F2937] border border-[#374151] rounded px-2 py-1 text-white font-mono-telemetry font-bold"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-[10px] text-gray-400">Card to Transfer:</span>
+            <div className="flex items-center space-x-1">
+              <button
+                onClick={() => onChangeMistakenIdentity({ sanctionToTransfer: 'YELLOW' })}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                  mistakenIdentityState.sanctionToTransfer === 'YELLOW'
+                    ? 'bg-amber-500 text-black'
+                    : 'bg-[#1F2937] text-gray-400'
+                }`}
+              >
+                Yellow
+              </button>
+              <button
+                onClick={() => onChangeMistakenIdentity({ sanctionToTransfer: 'RED' })}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                  mistakenIdentityState.sanctionToTransfer === 'RED'
+                    ? 'bg-red-600 text-white'
+                    : 'bg-[#1F2937] text-gray-400'
+                }`}
+              >
+                Red
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -182,7 +278,7 @@ export const DecisionTreeWizard: React.FC<DecisionTreeWizardProps> = ({
             }`}
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <span className="text-[11px]">Check Complete (Call Stands)</span>
+            <span className="text-[11px]">Check Complete</span>
           </button>
 
           <button
@@ -194,7 +290,7 @@ export const DecisionTreeWizard: React.FC<DecisionTreeWizardProps> = ({
             }`}
           >
             <ArrowRight className="w-3.5 h-3.5" />
-            <span className="text-[11px]">Factual Overturn (VAR Only)</span>
+            <span className="text-[11px]">Factual Overturn</span>
           </button>
 
           <button
@@ -206,7 +302,7 @@ export const DecisionTreeWizard: React.FC<DecisionTreeWizardProps> = ({
             }`}
           >
             <Tv className="w-3.5 h-3.5" />
-            <span className="text-[11px]">On-Field Review (OFR)</span>
+            <span className="text-[11px]">On-Field Review</span>
           </button>
         </div>
       </div>
@@ -222,9 +318,9 @@ export const DecisionTreeWizard: React.FC<DecisionTreeWizardProps> = ({
           >
             <option value="PENALTY_KICK">Penalty Kick</option>
             <option value="DIRECT_FREE_KICK">Direct Free Kick</option>
-            <option value="INDIRECT_FREE_KICK">Indirect Free Kick (Offside)</option>
+            <option value="INDIRECT_FREE_KICK">Indirect Free Kick</option>
             <option value="DROP_BALL">Drop Ball</option>
-            <option value="KICK_OFF">Kick-Off (Goal Confirmed)</option>
+            <option value="KICK_OFF">Kick-Off</option>
             <option value="CORNER_KICK">Corner Kick</option>
             <option value="GOAL_KICK">Goal Kick</option>
           </select>
@@ -266,6 +362,15 @@ export const DecisionTreeWizard: React.FC<DecisionTreeWizardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Part A.4: Commit & Log Official Decision Button */}
+      <button
+        onClick={onCommitDecision}
+        className="w-full py-2.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg transition"
+      >
+        <Save className="w-4 h-4" />
+        <span>Commit &amp; Log Official Decision to Match Audit Log</span>
+      </button>
     </div>
   );
 };

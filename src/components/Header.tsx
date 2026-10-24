@@ -1,6 +1,6 @@
 import React from 'react';
 import { ScenarioId, MatchScenario } from '../types/var';
-import { Shield, Tv, Volume2, FileSpreadsheet, Eye } from 'lucide-react';
+import { Shield, Tv, FileSpreadsheet, Keyboard, Bot } from 'lucide-react';
 
 interface HeaderProps {
   scenarios: MatchScenario[];
@@ -9,6 +9,7 @@ interface HeaderProps {
   matchClock: string;
   onOpenBroadcastModal: () => void;
   onOpenReportModal: () => void;
+  onOpenShortcutsModal: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,6 +19,7 @@ export const Header: React.FC<HeaderProps> = ({
   matchClock,
   onOpenBroadcastModal,
   onOpenReportModal,
+  onOpenShortcutsModal,
 }) => {
   return (
     <header className="bg-[#111827] border-b border-[#1F2937] px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-2xl">
@@ -32,11 +34,11 @@ export const Header: React.FC<HeaderProps> = ({
               VAR CONTROL ROOM
             </h1>
             <span className="px-1.5 py-0.2 rounded bg-blue-950 text-blue-300 border border-blue-700 text-[10px] font-mono-telemetry font-bold">
-              WORKSTATION v2.4
+              WORKSTATION v3.0
             </span>
           </div>
           <p className="text-[10px] text-gray-400 font-medium">
-            IFAB Certified Video Assistant Referee Operating Suite
+            IFAB Certified Video Assistant Referee Operating Suite &bull; Hawkeye &amp; SAOT
           </p>
         </div>
       </div>
@@ -48,7 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
           <select
             value={selectedScenarioId}
             onChange={(e) => onSelectScenario(e.target.value as ScenarioId)}
-            className="bg-[#1F2937] border border-[#374151] rounded px-2 py-1 text-xs text-white font-semibold focus:outline-none focus:border-blue-500"
+            className="bg-[#1F2937] border border-[#374151] rounded px-2 py-1 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 max-w-[280px] truncate"
           >
             {scenarios.map((sc) => (
               <option key={sc.id} value={sc.id}>
@@ -66,8 +68,17 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Right Actions: Giant Screen Broadcast / Audit Report */}
+      {/* Right Actions: Shortcuts / Giant Screen Broadcast / Audit Report */}
       <div className="flex items-center space-x-2">
+        <button
+          onClick={onOpenShortcutsModal}
+          title="Hardware EVS Controller & Keyboard Shortcuts"
+          className="px-2.5 py-1.5 rounded-lg bg-[#1F2937] hover:bg-[#374151] text-gray-300 text-xs font-bold flex items-center gap-1.5 border border-[#374151] transition"
+        >
+          <Keyboard className="w-3.5 h-3.5 text-sky-400" />
+          <span>Hotkeys</span>
+        </button>
+
         <button
           onClick={onOpenBroadcastModal}
           className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg transition"

@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { SaotState } from '../../types/var';
-import { Target, Lock, Unlock, Eye, Compass, RotateCcw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Target, Lock, Unlock, Eye, Compass, RotateCcw, AlertTriangle, CheckCircle2, Sliders } from 'lucide-react';
 
 interface SaotCalibrationPanelProps {
   saotState: SaotState;
@@ -39,7 +39,32 @@ export const SaotCalibrationPanel: React.FC<SaotCalibrationPanelProps> = ({
   onToggleRadar,
   onResetCalibration,
 }) => {
+  const [axisMode, setAxisMode] = useState<'X' | 'Y' | 'Z'>('X');
   const isOffside = saotState.deltaCm > 0;
+
+  const nudgeDefender = (deltaM: number) => {
+    if (axisMode === 'X') {
+      onUpdateDefenderPoint({ pitchX: Math.max(52.5, Math.min(105.0, saotState.defender.pitchX + deltaM)) });
+    } else if (axisMode === 'Y') {
+      onUpdateDefenderPoint({ pitchY: Math.max(0.0, Math.min(68.0, saotState.defender.pitchY + deltaM)) });
+    } else {
+      onUpdateDefenderPoint({
+        heightAboveGrassM: Math.max(0.1, Math.min(2.2, (saotState.defender.heightAboveGrassM || 1.35) + deltaM)),
+      });
+    }
+  };
+
+  const nudgeAttacker = (deltaM: number) => {
+    if (axisMode === 'X') {
+      onUpdateAttackerPoint({ pitchX: Math.max(52.5, Math.min(105.0, saotState.attacker.pitchX + deltaM)) });
+    } else if (axisMode === 'Y') {
+      onUpdateAttackerPoint({ pitchY: Math.max(0.0, Math.min(68.0, saotState.attacker.pitchY + deltaM)) });
+    } else {
+      onUpdateAttackerPoint({
+        heightAboveGrassM: Math.max(0.1, Math.min(2.2, (saotState.attacker.heightAboveGrassM || 1.45) + deltaM)),
+      });
+    }
+  };
 
   return (
     <div className="bg-[#111827] border border-[#1F2937] rounded-lg p-3 space-y-3 shadow-xl">
@@ -90,7 +115,7 @@ export const SaotCalibrationPanel: React.FC<SaotCalibrationPanelProps> = ({
             </span>
           </div>
           <p className="text-[10px] text-gray-400">
-            Offside must be judged at the first point of contact of the pass.
+            Offside must be judged at the first point of contact of the pass. Drag crosshairs directly on pitch canvas.
           </p>
         </div>
 
@@ -153,16 +178,53 @@ export const SaotCalibrationPanel: React.FC<SaotCalibrationPanelProps> = ({
         </div>
       </div>
 
-      {/* 3. Crosshair Calibration Sliders (Defender vs Attacker) */}
+      {/* Axis Nudge Selector (X, Y, Z) */}
+      <div className="flex items-center justify-between bg-[#0B0F19] px-2.5 py-1.5 rounded border border-[#1F2937] text-xs">
+        <span className="text-[10px] text-gray-400 flex items-center gap-1 font-semibold uppercase">
+          <Sliders className="w-3 h-3 text-sky-400" /> Micro-Nudge Axis:
+        </span>
+        <div className="flex items-center bg-[#111827] rounded p-0.5 border border-[#1F2937]">
+          <button
+            onClick={() => setAxisMode('X')}
+            className={`px-2 py-0.5 rounded text-[11px] font-mono-telemetry font-bold transition ${
+              axisMode === 'X' ? 'bg-sky-600 text-white' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            X (Length)
+          </button>
+          <button
+            onClick={() => setAxisMode('Y')}
+            className={`px-2 py-0.5 rounded text-[11px] font-mono-telemetry font-bold transition ${
+              axisMode === 'Y' ? 'bg-sky-600 text-white' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Y (Lateral)
+          </button>
+          <button
+            onClick={() => setAxisMode('Z')}
+            className={`px-2 py-0.5 rounded text-[11px] font-mono-telemetry font-bold transition ${
+              axisMode === 'Z' ? 'bg-sky-600 text-white' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Z (Elevation)
+          </button>
+        </div>
+      </div>
+
+      {/* 3. Crosshair Calibration Boxes (Defender vs Attacker) */}
       <div className="grid grid-cols-2 gap-3">
         {/* Defender (2nd Last Opponent) Crosshair Box */}
         <div className="bg-[#0B0F19] p-2.5 rounded border border-blue-900/60 space-y-2">
           <div className="flex items-center justify-between border-b border-blue-900/40 pb-1">
             <span className="text-xs font-bold text-sky-400 flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-sky-400" /> 2nd-Last Defender #4
+              <span className="w-2 h-2 rounded-full bg-sky-400" /> 2nd-Last Def
             </span>
             <span className="text-xs font-mono-telemetry text-gray-300">
-              {saotState.defender.pitchX.toFixed(3)}m
+              {axisMode === 'X'
+                ? `X: ${saotState.defender.pitchX.toFixed(3)}m`
+                : axisMode === 'Y'
+                ? `Y: ${saotState.defender.pitchY.toFixed(3)}m`
+                : `Z: ${(saotState.defender.heightAboveGrassM || 1.35).toFixed(2)}m`}
             </span>
           </div>
 
@@ -179,29 +241,29 @@ export const SaotCalibrationPanel: React.FC<SaotCalibrationPanelProps> = ({
             </select>
           </div>
 
-          {/* Micro-Adjustment buttons */}
+          {/* Micro-Adjustment buttons for selected axis */}
           <div className="flex items-center justify-between pt-1 text-xs">
             <button
-              onClick={() => onUpdateDefenderPoint({ pitchX: saotState.defender.pitchX - 0.05 })}
+              onClick={() => nudgeDefender(-0.05)}
               className="px-1.5 py-0.5 rounded bg-[#1F2937] hover:bg-[#374151] text-gray-200 font-mono-telemetry"
             >
               -5cm
             </button>
             <button
-              onClick={() => onUpdateDefenderPoint({ pitchX: saotState.defender.pitchX - 0.01 })}
+              onClick={() => nudgeDefender(-0.01)}
               className="px-1.5 py-0.5 rounded bg-[#1F2937] hover:bg-[#374151] text-gray-200 font-mono-telemetry"
             >
               -1cm
             </button>
-            <span className="text-[10px] text-gray-400">NUDGE</span>
+            <span className="text-[10px] text-gray-400">{axisMode}</span>
             <button
-              onClick={() => onUpdateDefenderPoint({ pitchX: saotState.defender.pitchX + 0.01 })}
+              onClick={() => nudgeDefender(0.01)}
               className="px-1.5 py-0.5 rounded bg-[#1F2937] hover:bg-[#374151] text-gray-200 font-mono-telemetry"
             >
               +1cm
             </button>
             <button
-              onClick={() => onUpdateDefenderPoint({ pitchX: saotState.defender.pitchX + 0.05 })}
+              onClick={() => nudgeDefender(0.05)}
               className="px-1.5 py-0.5 rounded bg-[#1F2937] hover:bg-[#374151] text-gray-200 font-mono-telemetry"
             >
               +5cm
@@ -213,10 +275,14 @@ export const SaotCalibrationPanel: React.FC<SaotCalibrationPanelProps> = ({
         <div className="bg-[#0B0F19] p-2.5 rounded border border-red-900/60 space-y-2">
           <div className="flex items-center justify-between border-b border-red-900/40 pb-1">
             <span className="text-xs font-bold text-red-400 flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-red-400" /> Leading Attacker #9
+              <span className="w-2 h-2 rounded-full bg-red-400" /> Leading Att
             </span>
             <span className="text-xs font-mono-telemetry text-gray-300">
-              {saotState.attacker.pitchX.toFixed(3)}m
+              {axisMode === 'X'
+                ? `X: ${saotState.attacker.pitchX.toFixed(3)}m`
+                : axisMode === 'Y'
+                ? `Y: ${saotState.attacker.pitchY.toFixed(3)}m`
+                : `Z: ${(saotState.attacker.heightAboveGrassM || 1.45).toFixed(2)}m`}
             </span>
           </div>
 
@@ -233,29 +299,29 @@ export const SaotCalibrationPanel: React.FC<SaotCalibrationPanelProps> = ({
             </select>
           </div>
 
-          {/* Micro-Adjustment buttons */}
+          {/* Micro-Adjustment buttons for selected axis */}
           <div className="flex items-center justify-between pt-1 text-xs">
             <button
-              onClick={() => onUpdateAttackerPoint({ pitchX: saotState.attacker.pitchX - 0.05 })}
+              onClick={() => nudgeAttacker(-0.05)}
               className="px-1.5 py-0.5 rounded bg-[#1F2937] hover:bg-[#374151] text-gray-200 font-mono-telemetry"
             >
               -5cm
             </button>
             <button
-              onClick={() => onUpdateAttackerPoint({ pitchX: saotState.attacker.pitchX - 0.01 })}
+              onClick={() => nudgeAttacker(-0.01)}
               className="px-1.5 py-0.5 rounded bg-[#1F2937] hover:bg-[#374151] text-gray-200 font-mono-telemetry"
             >
               -1cm
             </button>
-            <span className="text-[10px] text-gray-400">NUDGE</span>
+            <span className="text-[10px] text-gray-400">{axisMode}</span>
             <button
-              onClick={() => onUpdateAttackerPoint({ pitchX: saotState.attacker.pitchX + 0.01 })}
+              onClick={() => nudgeAttacker(0.01)}
               className="px-1.5 py-0.5 rounded bg-[#1F2937] hover:bg-[#374151] text-gray-200 font-mono-telemetry"
             >
               +1cm
             </button>
             <button
-              onClick={() => onUpdateAttackerPoint({ pitchX: saotState.attacker.pitchX + 0.05 })}
+              onClick={() => nudgeAttacker(0.05)}
               className="px-1.5 py-0.5 rounded bg-[#1F2937] hover:bg-[#374151] text-gray-200 font-mono-telemetry"
             >
               +5cm

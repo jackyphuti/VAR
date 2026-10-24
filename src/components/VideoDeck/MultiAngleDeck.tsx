@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { CameraId, SaotState, ScenarioId } from '../../types/var';
 import { CameraFeedCanvas } from './CameraFeedCanvas';
-import { Maximize2, Minimize2, Video, Grid, Film, Upload } from 'lucide-react';
+import { TelestratorOverlay } from './TelestratorOverlay';
+import { Maximize2, Grid, Film, Upload, Columns, PenTool } from 'lucide-react';
 
 interface MultiAngleDeckProps {
   scenarioId: ScenarioId;
@@ -11,6 +12,8 @@ interface MultiAngleDeckProps {
   onUploadCustomVideo: (file: File) => void;
   isCustomVideo: boolean;
   videoElement: HTMLVideoElement | null;
+  activeCameraId?: CameraId;
+  onSelectActiveCamera?: (id: CameraId) => void;
 }
 
 interface CameraMeta {
@@ -35,9 +38,19 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
   onUploadCustomVideo,
   isCustomVideo,
   videoElement,
+  activeCameraId = 'cam_16m',
+  onSelectActiveCamera,
 }) => {
-  const [maximizedCam, setMaximizedCam] = useState<CameraId | null>('cam_16m'); // Default 16-yard cam for offside checks
-  const [viewMode, setViewMode] = useState<'focused' | 'quad'>('focused');
+  const [maximizedCam, setMaximizedCam] = useState<CameraId>(activeCameraId);
+  const [viewMode, setViewMode] = useState<'focused' | 'quad' | 'split'>('focused');
+  const [splitCamLeft, setSplitCamLeft] = useState<CameraId>('cam_16m');
+  const [splitCamRight, setSplitCamRight] = useState<CameraId>('behind_goal');
+  const [telestratorActive, setTelestratorActive] = useState<boolean>(false);
+
+  const handleSelectCam = (id: CameraId) => {
+    setMaximizedCam(id);
+    if (onSelectActiveCamera) onSelectActiveCamera(id);
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -48,7 +61,7 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
   return (
     <div className="flex flex-col h-full space-y-2">
       {/* Top Deck Sub-Header */}
-      <div className="flex items-center justify-between px-2 py-1 bg-[#111827] rounded border border-[#1F2937] text-xs">
+      <div className="flex flex-wrap items-center justify-between px-2.5 py-1.5 bg-[#111827] rounded border border-[#1F2937] text-xs gap-2">
         <div className="flex items-center space-x-2">
           <Film className="w-4 h-4 text-blue-400" />
           <span className="font-bold text-gray-200">SYNCHRONIZED CAMERA ARRAY</span>
@@ -65,7 +78,18 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
             <input type="file" accept="video/mp4,video/webm" onChange={handleFileUpload} className="hidden" />
           </label>
 
-          {/* Toggle View Mode */}
+          {/* Telestrator Quick Toggle Button */}
+          <button
+            onClick={() => setTelestratorActive(!telestratorActive)}
+            className={`px-2 py-1 rounded text-xs flex items-center gap-1 font-semibold transition ${
+              telestratorActive ? 'bg-sky-600 text-white shadow' : 'bg-[#1F2937] text-gray-300 hover:text-white'
+            }`}
+          >
+            <PenTool className="w-3.5 h-3.5" />
+            <span>Telestrator</span>
+          </button>
+
+          {/* Toggle View Mode: Primary+PIP / Quad Grid / Split-Screen Dual Compare */}
           <div className="flex items-center bg-[#0B0F19] rounded border border-[#1F2937] p-0.5">
             <button
               onClick={() => setViewMode('focused')}
@@ -81,17 +105,25 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
                 viewMode === 'quad' ? 'bg-blue-600 text-white font-semibold' : 'text-gray-400 hover:text-white'
               }`}
             >
-              <Grid className="w-3 h-3" /> Quad Grid
+              <Grid className="w-3 h-3" /> Quad
+            </button>
+            <button
+              onClick={() => setViewMode('split')}
+              className={`px-2 py-0.5 rounded text-xs flex items-center gap-1 transition ${
+                viewMode === 'split' ? 'bg-blue-600 text-white font-semibold' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              <Columns className="w-3 h-3" /> Split Compare
             </button>
           </div>
         </div>
       </div>
 
       {/* Main Video View Area */}
-      {viewMode === 'focused' && maximizedCam ? (
+      {viewMode === 'focused' ? (
         <div className="flex-1 flex flex-col min-h-0 space-y-2">
           {/* Primary Maximized Monitor Canvas */}
-          <div className="relative flex-1 bg-black rounded-lg border-2 border-blue-600/70 overflow-hidden shadow-2xl min-h-[360px] broadcast-feed">
+          <div className="relative flex-1 bg-black rounded-lg border-2 border-blue-600/70 overflow-hidden shadow-2xl min-h-[380px] broadcast-feed">
             <CameraFeedCanvas
               cameraId={maximizedCam}
               scenarioId={scenarioId}
@@ -101,6 +133,12 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
               isMaximized={true}
               isCustomVideo={isCustomVideo}
               videoElement={videoElement}
+            />
+
+            {/* Telestrator Drawing Overlay */}
+            <TelestratorOverlay
+              isActive={telestratorActive}
+              onToggleActive={() => setTelestratorActive(!telestratorActive)}
             />
 
             {/* Live Camera HUD Overlay */}
@@ -114,7 +152,7 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
               </span>
             </div>
 
-            {/* Quick SAOT Offside Delta Watermark */}
+            {/* SAOT Offside Delta Badge */}
             {saotState.show3DLines && (
               <div className="absolute top-2 right-2 z-20">
                 <div
@@ -139,7 +177,7 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
               return (
                 <div
                   key={cam.id}
-                  onClick={() => setMaximizedCam(cam.id)}
+                  onClick={() => handleSelectCam(cam.id)}
                   className={`relative rounded-md overflow-hidden cursor-pointer transition border-2 ${
                     isSelected
                       ? 'border-blue-500 ring-2 ring-blue-500/40'
@@ -151,10 +189,10 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
                     scenarioId={scenarioId}
                     frameIndex={frameIndex}
                     saotState={saotState}
-                    isCustomVideo={false}
+                    isCustomVideo={isCustomVideo}
+                    videoElement={videoElement}
                   />
 
-                  {/* Camera Label */}
                   <div className="absolute bottom-1 left-1 right-1 flex items-center justify-between bg-black/80 backdrop-blur px-1.5 py-0.5 rounded text-[10px] font-mono-telemetry text-gray-300">
                     <span className="font-bold text-white">{cam.badge}</span>
                     <span className="truncate max-w-[80px]">{cam.name}</span>
@@ -162,6 +200,71 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
                 </div>
               );
             })}
+          </div>
+        </div>
+      ) : viewMode === 'split' ? (
+        /* Part B.3: Split-Screen Dual Compare Mode */
+        <div className="flex-1 flex flex-col space-y-2 min-h-[460px]">
+          <div className="flex-1 grid grid-cols-2 gap-2">
+            {/* Left Synchronized Camera */}
+            <div className="relative bg-black rounded-lg border-2 border-blue-600/70 overflow-hidden shadow-xl broadcast-feed">
+              <CameraFeedCanvas
+                cameraId={splitCamLeft}
+                scenarioId={scenarioId}
+                frameIndex={frameIndex}
+                saotState={saotState}
+                onUpdateSaotCrosshair={onUpdateSaotCrosshair}
+                isCustomVideo={isCustomVideo}
+                videoElement={videoElement}
+              />
+
+              <div className="absolute top-2 left-2 z-20 flex items-center gap-2 bg-[#0B0F19]/90 backdrop-blur px-2.5 py-1 rounded border border-[#1F2937]">
+                <span className="font-bold text-xs text-sky-400">FEED A (LEFT):</span>
+                <select
+                  value={splitCamLeft}
+                  onChange={(e) => setSplitCamLeft(e.target.value as CameraId)}
+                  className="bg-[#1F2937] border border-[#374151] rounded px-1.5 py-0.5 text-xs text-white"
+                >
+                  {CAMERAS.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.badge} - {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Right Synchronized Camera */}
+            <div className="relative bg-black rounded-lg border-2 border-amber-600/70 overflow-hidden shadow-xl broadcast-feed">
+              <CameraFeedCanvas
+                cameraId={splitCamRight}
+                scenarioId={scenarioId}
+                frameIndex={frameIndex}
+                saotState={saotState}
+                onUpdateSaotCrosshair={onUpdateSaotCrosshair}
+                isCustomVideo={isCustomVideo}
+                videoElement={videoElement}
+              />
+
+              <div className="absolute top-2 left-2 z-20 flex items-center gap-2 bg-[#0B0F19]/90 backdrop-blur px-2.5 py-1 rounded border border-[#1F2937]">
+                <span className="font-bold text-xs text-amber-400">FEED B (RIGHT):</span>
+                <select
+                  value={splitCamRight}
+                  onChange={(e) => setSplitCamRight(e.target.value as CameraId)}
+                  className="bg-[#1F2937] border border-[#374151] rounded px-1.5 py-0.5 text-xs text-white"
+                >
+                  {CAMERAS.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.badge} - {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-2 bg-[#111827] rounded border border-[#1F2937] text-center text-xs text-gray-400 font-mono-telemetry">
+            DUAL SPLIT SYNC: Both angles locked frame-by-frame (Frame #{frameIndex}). Use playback controls below.
           </div>
         </div>
       ) : (
@@ -178,10 +281,10 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
                 frameIndex={frameIndex}
                 saotState={saotState}
                 onUpdateSaotCrosshair={onUpdateSaotCrosshair}
-                isCustomVideo={false}
+                isCustomVideo={isCustomVideo}
+                videoElement={videoElement}
               />
 
-              {/* Feed Header */}
               <div className="absolute top-1.5 left-1.5 right-1.5 flex items-center justify-between bg-[#0B0F19]/80 backdrop-blur px-2 py-1 rounded text-xs font-mono-telemetry text-gray-200">
                 <div className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
@@ -190,7 +293,7 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
                 </div>
                 <button
                   onClick={() => {
-                    setMaximizedCam(cam.id);
+                    handleSelectCam(cam.id);
                     setViewMode('focused');
                   }}
                   title="Maximize this camera angle"

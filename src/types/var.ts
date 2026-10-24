@@ -10,7 +10,15 @@ export interface CameraFeedConfig {
   status: 'ONLINE' | 'STANDBY' | 'CALIBRATING';
 }
 
-export type ScenarioId = 'tight_offside' | 'penalty_tackle' | 'goal_line_handball' | 'custom_upload';
+export type ScenarioId = 'tight_offside' | 'penalty_tackle' | 'goal_line_handball' | 'glt_millimeter_check' | 'custom_upload';
+
+export interface AppPhase {
+  id: string;
+  name: string;
+  frame: number;
+  description: string;
+  badgeColor: string;
+}
 
 export interface MatchScenario {
   id: ScenarioId;
@@ -25,11 +33,13 @@ export interface MatchScenario {
     dogso?: Partial<DogsoState>;
     sfp?: Partial<SfpState>;
     handball?: Partial<HandballState>;
+    mistakenIdentity?: Partial<MistakenIdentityState>;
   };
   description: string;
   totalFrames: number;
   kickFrame: number;
   incidentFrame: number;
+  appPhases?: AppPhase[];
   defaultSaot: {
     defenderPitchX: number;
     attackerPitchX: number;
@@ -71,8 +81,8 @@ export interface SaotCrosshair {
   active: boolean;
   screenX: number;
   screenY: number;
-  pitchX: number; // in meters (0 to 105)
-  pitchY: number; // in meters (0 to 68)
+  pitchX: number; // in meters (52.5 to 105.0)
+  pitchY: number; // in meters (0.0 to 68.0)
   bodyPart: string;
   heightAboveGrassM: number;
 }
@@ -117,6 +127,7 @@ export interface MistakenIdentityState {
   incorrectPlayerNumber: number;
   correctPlayerNumber: number;
   verifiedByMultiAngle: boolean;
+  sanctionToTransfer: DisciplinaryCard;
 }
 
 export interface MatchIncident {
@@ -147,4 +158,58 @@ export interface BroadcastOverlayConfig {
   teamAway: string;
   scoreHome: number;
   scoreAway: number;
+}
+
+/* Telestrator & Tactical Drawing Types */
+export type TelestratorTool = 'select' | 'pen' | 'arrow' | 'halo' | 'protractor' | 'loupe';
+
+export interface TelestratorDrawing {
+  id: string;
+  type: 'pen' | 'arrow' | 'halo' | 'protractor';
+  points: { x: number; y: number }[];
+  color: string;
+  width: number;
+  angleDeg?: number;
+  distanceM?: number;
+}
+
+/* Goal Line Technology (GLT) State */
+export interface GltState {
+  active: boolean;
+  ballPitchX: number; // 105.0 is goal line outer edge
+  ballPitchY: number; // 34.0 is goal mouth center
+  ballElevationM: number;
+  ballDiameterCm: number; // 22.0 cm standard FIFA size 5
+  goalLineWidthCm: number; // 12.0 cm standard FIFA line
+  overhangMm: number; // positive = wholly over line (GOAL), negative = still on line (NO GOAL)
+  isGoal: boolean;
+  watchSignal: 'GOAL' | 'NO_GOAL';
+  cameraView: 'top_down' | 'cross_section' | '3d_mesh';
+}
+
+/* AI Co-Pilot Telemetry & Evaluation */
+export interface AiVarAnalysis {
+  confidenceScore: number; // 0..100
+  thresholdMet: boolean;
+  ifabClause: string;
+  primaryFinding: string;
+  recommendedRestart: MatchRestart;
+  recommendedSanction: DisciplinaryCard;
+  recommendedAction: RecommendedAction;
+  telemetryBreakdown: {
+    ballVelocityMs?: number;
+    collisionIoU?: number;
+    studElevationCm?: number;
+    silhouetteAngleDeg?: number;
+    offsideDeltaCm?: number;
+    dogsoDefendersCount?: number;
+    lineOverhangMm?: number;
+  };
+}
+
+/* Referee Review Area (RRA) Pitch-Side Mode */
+export interface RraModeConfig {
+  isActive: boolean;
+  playbackPhase: 'slow_mo_contact' | 'normal_speed_intensity';
+  loopCount: number;
 }
