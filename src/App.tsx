@@ -14,6 +14,7 @@ import {
   MistakenIdentityState,
   MatchIncident,
   GltState,
+  VideoSourceType,
 } from './types/var';
 import { MATCH_SCENARIOS } from './scenarios/matchScenarios';
 import { Header } from './components/Header';
@@ -30,7 +31,10 @@ import { GoalLineTechPanel } from './components/GLT/GoalLineTechPanel';
 import { AiVarAssistant } from './components/AICoPilot/AiVarAssistant';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { CameraFeedCanvas } from './components/VideoDeck/CameraFeedCanvas';
-import { playAlertTone } from './utils/audio';
+import { YouTubePlayerFeed } from './components/VideoDeck/YouTubePlayerFeed';
+import { VideoUrlModal } from './components/VideoDeck/VideoUrlModal';
+import { parseYouTubeVideoId, isDirectVideoUrl } from './utils/youtube';
+import { playAlertTone, playRadioChirp } from './utils/audio';
 import { Tv, Play, Pause, ChevronRight, X, ArrowLeft } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -47,7 +51,11 @@ export const App: React.FC = () => {
   const [totalFrames, setTotalFrames] = useState<number>(activeScenario.totalFrames);
   const [activeCam, setActiveCam] = useState<CameraId>('cam_16m');
 
-  // Custom uploaded video handling (Part A.3)
+  // Custom uploaded video & YouTube stream handling
+  const [videoSourceType, setVideoSourceType] = useState<VideoSourceType>('simulation');
+  const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null);
+  const [videoTitle, setVideoTitle] = useState<string>('');
+  const [showUrlModal, setShowUrlModal] = useState<boolean>(false);
   const [customVideoUrl, setCustomVideoUrl] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -208,6 +216,13 @@ export const App: React.FC = () => {
   // Synchronize scenario switches
   const handleSelectScenario = (id: ScenarioId) => {
     setSelectedScenarioId(id);
+    if (id !== 'custom_upload') {
+      setVideoSourceType('simulation');
+      setYoutubeVideoId(null);
+      setCustomVideoUrl(null);
+      videoRef.current = null;
+      setVideoTitle('');
+    }
     const scen = MATCH_SCENARIOS.find((s) => s.id === id);
     if (!scen) return;
 
@@ -347,7 +362,11 @@ export const App: React.FC = () => {
   // Custom Video Upload (Part A.3)
   const handleUploadCustomVideo = (file: File) => {
     const url = URL.createObjectURL(file);
+    setVideoSourceType('file_upload');
+    setYoutubeVideoId(null);
     setCustomVideoUrl(url);
+    setVideoTitle(file.name);
+    setSelectedScenarioId('custom_upload');
 
     const vid = document.createElement('video');
     vid.src = url;
@@ -360,6 +379,61 @@ export const App: React.FC = () => {
     };
 
     videoRef.current = vid;
+    playRadioChirp();
+  };
+
+  // Load Video from URL (YouTube link or Direct Video stream)
+  const handleLoadVideoUrl = (url: string) => {
+    const ytId = parseYouTubeVideoId(url);
+    if (ytId) {
+      setVideoSourceType('youtube');
+      setYoutubeVideoId(ytId);
+      setCustomVideoUrl(null);
+      videoRef.current = null;
+      setVideoTitle('YouTube Incident Stream');
+      setSelectedScenarioId('custom_upload');
+      setIsPlaying(false);
+      setCurrentFrame(0);
+      setTotalFrames(3600); // 60 seconds default until duration callback updates it
+      playRadioChirp();
+      return;
+    }
+
+    if (isDirectVideoUrl(url) || url.startsWith('http://') || url.startsWith('https://')) {
+      setVideoSourceType('video_url');
+      setYoutubeVideoId(null);
+      setCustomVideoUrl(url);
+      setVideoTitle('Direct Video Stream');
+      setSelectedScenarioId('custom_upload');
+      setIsPlaying(false);
+      setCurrentFrame(0);
+
+      const vid = document.createElement('video');
+      vid.src = url;
+      vid.crossOrigin = 'anonymous';
+      vid.muted = true;
+      vid.playsInline = true;
+      vid.onloadedmetadata = () => {
+        const frames = Math.max(60, Math.floor(vid.duration * 60));
+        setTotalFrames(frames);
+      };
+      videoRef.current = vid;
+      playRadioChirp();
+    }
+  };
+
+  // Clear custom video stream and return to stadium simulation
+  const handleClearCustomVideo = () => {
+    setVideoSourceType('simulation');
+    setYoutubeVideoId(null);
+    setCustomVideoUrl(null);
+    videoRef.current = null;
+    setVideoTitle('');
+    setSelectedScenarioId('tight_offside');
+    setTotalFrames(240);
+    setCurrentFrame(72);
+    setIsPlaying(false);
+    playAlertTone('SUCCESS');
   };
 
   // Part A.4: Commit and Log Decision into IncidentTimeline
@@ -469,6 +543,8 @@ export const App: React.FC = () => {
         onOpenBroadcastModal={() => setShowBroadcastModal(true)}
         onOpenReportModal={() => setShowReportModal(true)}
         onOpenShortcutsModal={() => setShowShortcutsModal(true)}
+        videoSourceType={videoSourceType}
+        onOpenUrlModal={() => setShowUrlModal(true)}
       />
 
       {/* Main Container */}
@@ -522,16 +598,35 @@ export const App: React.FC = () => {
             </div>
 
             <div className="flex-1 relative my-3 rounded-lg overflow-hidden border border-purple-900/50">
-              <CameraFeedCanvas
-                cameraId={activeCam}
-                scenarioId={selectedScenarioId}
-                frameIndex={currentFrame}
-                saotState={saotState}
-                onUpdateSaotCrosshair={handleUpdateSaotCrosshair}
-                isMaximized={true}
-                isCustomVideo={!!customVideoUrl}
-                videoElement={videoRef.current}
-              />
+              {videoSourceType === 'youtube' && youtubeVideoId ? (
+                <YouTubePlayerFeed
+                  videoId={youtubeVideoId}
+                  currentFrame={currentFrame}
+                  totalFrames={totalFrames}
+                  isPlaying={isPlaying}
+                  playbackRate={playbackRate}
+                  isLooping={isLooping}
+                  loopA={loopA}
+                  loopB={loopB}
+                  onFrameUpdate={setCurrentFrame}
+                  onDurationChange={(dur) => setTotalFrames(Math.max(60, Math.floor(dur * 60)))}
+                  onPlayStateChange={setIsPlaying}
+                  saotState={saotState}
+                  onUpdateSaotCrosshair={handleUpdateSaotCrosshair}
+                  scenarioId={selectedScenarioId}
+                />
+              ) : (
+                <CameraFeedCanvas
+                  cameraId={activeCam}
+                  scenarioId={selectedScenarioId}
+                  frameIndex={currentFrame}
+                  saotState={saotState}
+                  onUpdateSaotCrosshair={handleUpdateSaotCrosshair}
+                  isMaximized={true}
+                  isCustomVideo={!!customVideoUrl}
+                  videoElement={videoRef.current}
+                />
+              )}
             </div>
 
             <div className="bg-[#111827] p-3 rounded-lg border border-[#1F2937] flex items-center justify-between">
@@ -561,6 +656,20 @@ export const App: React.FC = () => {
                   videoElement={videoRef.current}
                   activeCameraId={activeCam}
                   onSelectActiveCamera={setActiveCam}
+                  videoSourceType={videoSourceType}
+                  youtubeVideoId={youtubeVideoId}
+                  videoTitle={videoTitle}
+                  onOpenUrlModal={() => setShowUrlModal(true)}
+                  onClearVideo={handleClearCustomVideo}
+                  isPlaying={isPlaying}
+                  playbackRate={playbackRate}
+                  isLooping={isLooping}
+                  loopA={loopA}
+                  loopB={loopB}
+                  totalFrames={totalFrames}
+                  onSeekFrame={setCurrentFrame}
+                  onDurationChange={(dur) => setTotalFrames(Math.max(60, Math.floor(dur * 60)))}
+                  onPlayStateChange={setIsPlaying}
                 />
               </div>
 
@@ -756,6 +865,16 @@ export const App: React.FC = () => {
       <KeyboardShortcutsModal
         isOpen={showShortcutsModal}
         onClose={() => setShowShortcutsModal(false)}
+      />
+
+      {/* Video URL & YouTube Incident Feed Modal */}
+      <VideoUrlModal
+        isOpen={showUrlModal}
+        onClose={() => setShowUrlModal(false)}
+        onLoadUrl={handleLoadVideoUrl}
+        onClearVideo={handleClearCustomVideo}
+        currentSourceType={videoSourceType}
+        currentVideoTitle={videoTitle}
       />
     </div>
   );

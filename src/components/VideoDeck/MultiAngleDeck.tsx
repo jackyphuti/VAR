@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { CameraId, SaotState, ScenarioId } from '../../types/var';
+import { CameraId, SaotState, ScenarioId, VideoSourceType } from '../../types/var';
 import { CameraFeedCanvas } from './CameraFeedCanvas';
+import { YouTubePlayerFeed } from './YouTubePlayerFeed';
 import { TelestratorOverlay } from './TelestratorOverlay';
-import { Maximize2, Grid, Film, Upload, Columns, PenTool } from 'lucide-react';
+import { Maximize2, Grid, Film, Upload, Columns, PenTool, RotateCcw } from 'lucide-react';
 
 interface MultiAngleDeckProps {
   scenarioId: ScenarioId;
@@ -14,6 +15,20 @@ interface MultiAngleDeckProps {
   videoElement: HTMLVideoElement | null;
   activeCameraId?: CameraId;
   onSelectActiveCamera?: (id: CameraId) => void;
+  videoSourceType?: VideoSourceType;
+  youtubeVideoId?: string | null;
+  videoTitle?: string;
+  onOpenUrlModal?: () => void;
+  onClearVideo?: () => void;
+  isPlaying?: boolean;
+  playbackRate?: number;
+  isLooping?: boolean;
+  loopA?: number | null;
+  loopB?: number | null;
+  totalFrames?: number;
+  onSeekFrame?: (frame: number) => void;
+  onDurationChange?: (durationSec: number) => void;
+  onPlayStateChange?: (isPlaying: boolean) => void;
 }
 
 interface CameraMeta {
@@ -40,6 +55,20 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
   videoElement,
   activeCameraId = 'cam_16m',
   onSelectActiveCamera,
+  videoSourceType = 'simulation',
+  youtubeVideoId = null,
+  videoTitle,
+  onOpenUrlModal,
+  onClearVideo,
+  isPlaying = false,
+  playbackRate = 1.0,
+  isLooping = false,
+  loopA = null,
+  loopB = null,
+  totalFrames = 240,
+  onSeekFrame,
+  onDurationChange,
+  onPlayStateChange,
 }) => {
   const [maximizedCam, setMaximizedCam] = useState<CameraId>(activeCameraId);
   const [viewMode, setViewMode] = useState<'focused' | 'quad' | 'split'>('focused');
@@ -64,15 +93,62 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
       <div className="flex flex-wrap items-center justify-between px-2.5 py-1.5 bg-[#111827] rounded border border-[#1F2937] text-xs gap-2">
         <div className="flex items-center space-x-2">
           <Film className="w-4 h-4 text-blue-400" />
-          <span className="font-bold text-gray-200">SYNCHRONIZED CAMERA ARRAY</span>
-          <span className="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-mono-telemetry font-bold animate-pulse-subtle">
-            ● 4/4 FEEDS SYNCED
+          <span className="font-bold text-gray-200">
+            {videoSourceType === 'youtube'
+              ? 'YOUTUBE MATCH INCIDENT STREAM'
+              : videoSourceType === 'video_url'
+              ? 'DIRECT VIDEO STREAM'
+              : videoSourceType === 'file_upload'
+              ? 'CUSTOM MP4 PLAYBACK'
+              : 'SYNCHRONIZED CAMERA ARRAY'}
+          </span>
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono-telemetry font-bold ${
+            videoSourceType === 'youtube'
+              ? 'bg-red-950 text-red-400 border border-red-800'
+              : 'bg-emerald-950 text-emerald-400 border border-emerald-800 animate-pulse-subtle'
+          }`}>
+            {videoSourceType === 'youtube'
+              ? '● YOUTUBE SYNCED'
+              : videoSourceType === 'video_url'
+              ? '● STREAM SYNCED'
+              : '● 4/4 FEEDS SYNCED'}
           </span>
         </div>
 
         <div className="flex items-center space-x-2">
+          {/* YouTube / Video URL Button */}
+          {onOpenUrlModal && (
+            <button
+              onClick={onOpenUrlModal}
+              title="Load YouTube URL or Direct Video Link"
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold transition ${
+                videoSourceType === 'youtube'
+                  ? 'bg-red-600 hover:bg-red-500 text-white shadow ring-2 ring-red-400/50'
+                  : videoSourceType === 'video_url'
+                  ? 'bg-blue-600 hover:bg-blue-500 text-white shadow ring-2 ring-blue-400/50'
+                  : 'bg-[#1F2937] hover:bg-[#374151] text-gray-200 border border-[#374151]'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+              </svg>
+              <span>{videoSourceType === 'youtube' ? 'YouTube Active' : 'Load Link / YouTube'}</span>
+            </button>
+          )}
+
+          {/* Reset / Return to Simulation */}
+          {videoSourceType !== 'simulation' && onClearVideo && (
+            <button
+              onClick={onClearVideo}
+              title="Reset to 4-Camera Stadium Simulation"
+              className="p-1 rounded bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-800 transition"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           {/* Custom video upload */}
-          <label className="flex items-center gap-1 px-2 py-1 bg-[#1F2937] hover:bg-[#374151] text-gray-300 rounded cursor-pointer transition text-xs">
+          <label className="flex items-center gap-1 px-2 py-1 bg-[#1F2937] hover:bg-[#374151] text-gray-300 rounded cursor-pointer transition text-xs border border-[#374151]">
             <Upload className="w-3.5 h-3.5 text-blue-400" />
             <span>Upload MP4</span>
             <input type="file" accept="video/mp4,video/webm" onChange={handleFileUpload} className="hidden" />
@@ -124,16 +200,35 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
         <div className="flex-1 flex flex-col min-h-0 space-y-2">
           {/* Primary Maximized Monitor Canvas */}
           <div className="relative flex-1 bg-black rounded-lg border-2 border-blue-600/70 overflow-hidden shadow-2xl min-h-[380px] broadcast-feed">
-            <CameraFeedCanvas
-              cameraId={maximizedCam}
-              scenarioId={scenarioId}
-              frameIndex={frameIndex}
-              saotState={saotState}
-              onUpdateSaotCrosshair={onUpdateSaotCrosshair}
-              isMaximized={true}
-              isCustomVideo={isCustomVideo}
-              videoElement={videoElement}
-            />
+            {videoSourceType === 'youtube' && youtubeVideoId ? (
+              <YouTubePlayerFeed
+                videoId={youtubeVideoId}
+                currentFrame={frameIndex}
+                totalFrames={totalFrames}
+                isPlaying={isPlaying}
+                playbackRate={playbackRate}
+                isLooping={isLooping}
+                loopA={loopA}
+                loopB={loopB}
+                onFrameUpdate={onSeekFrame || (() => {})}
+                onDurationChange={onDurationChange || (() => {})}
+                onPlayStateChange={onPlayStateChange || (() => {})}
+                saotState={saotState}
+                onUpdateSaotCrosshair={onUpdateSaotCrosshair}
+                scenarioId={scenarioId}
+              />
+            ) : (
+              <CameraFeedCanvas
+                cameraId={maximizedCam}
+                scenarioId={scenarioId}
+                frameIndex={frameIndex}
+                saotState={saotState}
+                onUpdateSaotCrosshair={onUpdateSaotCrosshair}
+                isMaximized={true}
+                isCustomVideo={isCustomVideo}
+                videoElement={videoElement}
+              />
+            )}
 
             {/* Telestrator Drawing Overlay */}
             <TelestratorOverlay
@@ -141,32 +236,35 @@ export const MultiAngleDeck: React.FC<MultiAngleDeckProps> = ({
               onToggleActive={() => setTelestratorActive(!telestratorActive)}
             />
 
-            {/* Live Camera HUD Overlay */}
-            <div className="absolute top-2 left-2 z-20 flex items-center gap-2 bg-[#0B0F19]/90 backdrop-blur px-2.5 py-1 rounded border border-[#1F2937]">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-              <span className="font-mono-telemetry font-bold text-xs text-white">
-                {CAMERAS.find((c) => c.id === maximizedCam)?.badge} : {CAMERAS.find((c) => c.id === maximizedCam)?.name}
-              </span>
-              <span className="text-[10px] text-gray-400 font-mono-telemetry">
-                [{CAMERAS.find((c) => c.id === maximizedCam)?.spec}]
-              </span>
-            </div>
-
-            {/* SAOT Offside Delta Badge */}
-            {saotState.show3DLines && (
-              <div className="absolute top-2 right-2 z-20">
-                <div
-                  className={`px-3 py-1.5 rounded-lg border font-mono-telemetry font-extrabold text-sm shadow-lg ${
-                    saotState.deltaCm > 0
-                      ? 'bg-red-950/90 text-red-200 border-red-500'
-                      : 'bg-emerald-950/90 text-emerald-200 border-emerald-500'
-                  }`}
-                >
-                  {saotState.deltaCm > 0
-                    ? `OFFSIDE: +${saotState.deltaCm.toFixed(1)} cm`
-                    : `ONSIDE: ${saotState.deltaCm.toFixed(1)} cm`}
+            {/* Live Camera HUD Overlay (when not YouTube) */}
+            {videoSourceType !== 'youtube' && (
+              <>
+                <div className="absolute top-2 left-2 z-20 flex items-center gap-2 bg-[#0B0F19]/90 backdrop-blur px-2.5 py-1 rounded border border-[#1F2937]">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                  <span className="font-mono-telemetry font-bold text-xs text-white">
+                    {CAMERAS.find((c) => c.id === maximizedCam)?.badge} : {CAMERAS.find((c) => c.id === maximizedCam)?.name}
+                  </span>
+                  <span className="text-[10px] text-gray-400 font-mono-telemetry">
+                    [{CAMERAS.find((c) => c.id === maximizedCam)?.spec}]
+                  </span>
                 </div>
-              </div>
+
+                {saotState.show3DLines && (
+                  <div className="absolute top-2 right-2 z-20">
+                    <div
+                      className={`px-3 py-1.5 rounded-lg border font-mono-telemetry font-extrabold text-sm shadow-lg ${
+                        saotState.deltaCm > 0
+                          ? 'bg-red-950/90 text-red-200 border-red-500'
+                          : 'bg-emerald-950/90 text-emerald-200 border-emerald-500'
+                      }`}
+                    >
+                      {saotState.deltaCm > 0
+                        ? `OFFSIDE: +${saotState.deltaCm.toFixed(1)} cm`
+                        : `ONSIDE: ${saotState.deltaCm.toFixed(1)} cm`}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

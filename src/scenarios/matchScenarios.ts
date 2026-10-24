@@ -134,6 +134,28 @@ export const MATCH_SCENARIOS: MatchScenario[] = [
       category: 'GOAL_NO_GOAL',
     },
   },
+  {
+    id: 'custom_upload',
+    title: 'Custom Match Feed: YouTube / Web Video Stream',
+    matchClock: "LIVE",
+    minute: 45,
+    category: 'GOAL_NO_GOAL',
+    originalCall: 'UNDER VAR REVIEW (EXTERNAL STREAM)',
+    recommendedAction: 'ON_FIELD_REVIEW',
+    description: 'External match video feed loaded via YouTube link or direct video stream. Calibrated for 3D SAOT lines, Telestrator, and IFAB checklist analysis.',
+    totalFrames: 3600,
+    kickFrame: 60,
+    incidentFrame: 90,
+    defaultSaot: {
+      defenderPitchX: 86.5,
+      attackerPitchX: 87.2,
+      deltaCm: 70.0,
+      isOffside: true,
+    },
+    suggestedChecklist: {
+      category: 'GOAL_NO_GOAL',
+    },
+  },
 ];
 
 export interface Player3D {
@@ -266,6 +288,21 @@ export function getScenarioFrameState(scenarioId: ScenarioId, frame: number): Sc
       passFrame: frame === 45,
       incidentFrame: frame >= 112 && frame <= 120,
       offsideMarginCm: -470.0,
+    };
+  }
+
+  if (scenarioId === 'custom_upload') {
+    return {
+      ball: { x: 88.0, y: 34.0, z: 0.15 },
+      players: [
+        { id: 1, team: 'GOALKEEPER', number: 1, pitchX: 104.0, pitchY: 34.0, z: 0, actionState: 'STANDING' },
+        { id: 4, team: 'DEFENDER', number: 4, pitchX: 86.5, pitchY: 32.0, z: 0, actionState: 'RUNNING' },
+        { id: 9, team: 'ATTACKER', number: 9, pitchX: 87.2, pitchY: 31.0, z: 0, actionState: 'RUNNING' },
+        { id: 99, team: 'REFEREE', number: 0, pitchX: 75.0, pitchY: 42.0, z: 0, actionState: 'RUNNING' },
+      ],
+      passFrame: frame === 60,
+      incidentFrame: frame >= 90 && frame <= 100,
+      offsideMarginCm: 70.0,
     };
   }
 

@@ -10,6 +10,15 @@ export interface CameraFeedConfig {
   status: 'ONLINE' | 'STANDBY' | 'CALIBRATING';
 }
 
+export type VideoSourceType = 'simulation' | 'file_upload' | 'video_url' | 'youtube';
+
+export interface VideoSourceState {
+  type: VideoSourceType;
+  title: string;
+  url?: string;
+  youtubeId?: string;
+}
+
 export type ScenarioId = 'tight_offside' | 'penalty_tackle' | 'goal_line_handball' | 'glt_millimeter_check' | 'custom_upload';
 
 export interface AppPhase {

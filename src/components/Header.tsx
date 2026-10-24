@@ -1,6 +1,6 @@
 import React from 'react';
-import { ScenarioId, MatchScenario } from '../types/var';
-import { Shield, Tv, FileSpreadsheet, Keyboard, Bot } from 'lucide-react';
+import { ScenarioId, MatchScenario, VideoSourceType } from '../types/var';
+import { Shield, Tv, FileSpreadsheet, Keyboard, Bot, Link } from 'lucide-react';
 
 interface HeaderProps {
   scenarios: MatchScenario[];
@@ -10,6 +10,8 @@ interface HeaderProps {
   onOpenBroadcastModal: () => void;
   onOpenReportModal: () => void;
   onOpenShortcutsModal: () => void;
+  videoSourceType?: VideoSourceType;
+  onOpenUrlModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -20,6 +22,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenBroadcastModal,
   onOpenReportModal,
   onOpenShortcutsModal,
+  videoSourceType = 'simulation',
+  onOpenUrlModal,
 }) => {
   return (
     <header className="bg-[#111827] border-b border-[#1F2937] px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-2xl">
@@ -68,8 +72,27 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Right Actions: Shortcuts / Giant Screen Broadcast / Audit Report */}
+      {/* Right Actions: YouTube / Shortcuts / Giant Screen Broadcast / Audit Report */}
       <div className="flex items-center space-x-2">
+        {onOpenUrlModal && (
+          <button
+            onClick={onOpenUrlModal}
+            title="Load YouTube URL or Direct Video Link"
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+              videoSourceType === 'youtube'
+                ? 'bg-red-600 hover:bg-red-500 text-white shadow-lg ring-2 ring-red-400/50'
+                : videoSourceType === 'video_url'
+                ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg ring-2 ring-blue-400/50'
+                : 'bg-[#1F2937] hover:bg-[#374151] text-gray-300 border border-[#374151]'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5 fill-current text-red-400" viewBox="0 0 24 24">
+              <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+            </svg>
+            <span>{videoSourceType === 'youtube' ? 'YouTube Feed' : 'Load Link / YouTube'}</span>
+          </button>
+        )}
+
         <button
           onClick={onOpenShortcutsModal}
           title="Hardware EVS Controller & Keyboard Shortcuts"
