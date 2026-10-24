@@ -15,7 +15,12 @@ import os
 from dataclasses import asdict, dataclass
 from typing import Deque, Dict, List, Optional, Tuple
 
-import cv2
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None
+    CV2_AVAILABLE = False
 import numpy as np
 
 from .detector import TrackedObject

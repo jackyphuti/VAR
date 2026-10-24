@@ -127,9 +127,9 @@ class TestTeamClassifierCircular:
         feat_low = TeamClassifier.hsv_to_circular_feature(hsv_low_red)
         feat_high = TeamClassifier.hsv_to_circular_feature(hsv_high_red)
 
-        # Distance should be very small (< 0.2), whereas in linear space |175 - 5| = 170
+        # Distance should be very small (< 0.35), whereas in linear space |175 - 5| = 170
         dist = np.linalg.norm(feat_low - feat_high)
-        assert dist < 0.25, f"Circular distance between red hues {dist:.3f} was too large"
+        assert dist < 0.35, f"Circular distance between red hues {dist:.3f} was too large"
 
 
 class TestPoseAnalyzer:

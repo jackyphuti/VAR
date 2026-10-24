@@ -15,7 +15,13 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional, Tuple
 
-import cv2
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None
+    CV2_AVAILABLE = False
+
 import numpy as np
 
 logger = logging.getLogger("VAR.Homography")
@@ -81,9 +87,24 @@ class PitchHomography:
             logger.error("At least 4 correspondence points required for homography.")
             return False
 
-        H, status = cv2.findHomography(pixel_points, pitch_points_meters, cv2.RANSAC, 5.0)
+        if CV2_AVAILABLE and cv2 is not None:
+            H, status = cv2.findHomography(pixel_points, pitch_points_meters, cv2.RANSAC, 5.0)
+        else:
+            # Fallback Direct Linear Transform (DLT) via SVD using pure NumPy
+            A = []
+            for i in range(len(pixel_points)):
+                u, v = pixel_points[i]
+                X, Y = pitch_points_meters[i]
+                A.append([-u, -v, -1.0, 0.0, 0.0, 0.0, u * X, v * X, X])
+                A.append([0.0, 0.0, 0.0, -u, -v, -1.0, u * Y, v * Y, Y])
+            A = np.array(A, dtype=np.float64)
+            _, _, Vh = np.linalg.svd(A)
+            H = Vh[-1].reshape(3, 3)
+            if abs(H[2, 2]) > 1e-8:
+                H = H / H[2, 2]
+
         if H is None:
-            logger.error("cv2.findHomography failed to solve planar transform.")
+            logger.error("Failed to solve planar transform.")
             return False
 
         if self.H is None:
@@ -187,10 +208,16 @@ class PitchHomography:
         if self.H is None:
             raise RuntimeError("Homography matrix is not initialized.")
 
-        src = np.array([[[u, v]]], dtype=np.float32)
-        dst = cv2.perspectiveTransform(src, self.H)
-        x_m, y_m = dst[0][0]
-        return float(x_m), float(y_m)
+        if CV2_AVAILABLE and cv2 is not None:
+            src = np.array([[[u, v]]], dtype=np.float32)
+            dst = cv2.perspectiveTransform(src, self.H)
+            x_m, y_m = dst[0][0]
+            return float(x_m), float(y_m)
+        else:
+            vec = np.array([u, v, 1.0], dtype=np.float64)
+            res = np.dot(self.H, vec)
+            w = res[2] if abs(res[2]) > 1e-9 else 1e-9
+            return float(res[0] / w), float(res[1] / w)
 
     def pitch_to_pixel(self, x_m: float, y_m: float) -> Tuple[float, float]:
         """
@@ -199,10 +226,16 @@ class PitchHomography:
         if self.H_inv is None:
             raise RuntimeError("Inverse homography matrix is not initialized.")
 
-        src = np.array([[[x_m, y_m]]], dtype=np.float32)
-        dst = cv2.perspectiveTransform(src, self.H_inv)
-        u, v = dst[0][0]
-        return float(u), float(v)
+        if CV2_AVAILABLE and cv2 is not None:
+            src = np.array([[[x_m, y_m]]], dtype=np.float32)
+            dst = cv2.perspectiveTransform(src, self.H_inv)
+            u, v = dst[0][0]
+            return float(u), float(v)
+        else:
+            vec = np.array([x_m, y_m, 1.0], dtype=np.float64)
+            res = np.dot(self.H_inv, vec)
+            w = res[2] if abs(res[2]) > 1e-9 else 1e-9
+            return float(res[0] / w), float(res[1] / w)
 
     def is_inside_penalty_area(self, x_m: float, y_m: float, target_goal_x: float = 105.0) -> bool:
         """

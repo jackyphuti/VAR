@@ -13,7 +13,12 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-import cv2
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None
+    CV2_AVAILABLE = False
 import numpy as np
 
 try:
@@ -107,13 +112,29 @@ class TeamClassifier:
         if torso_crop.size == 0:
             return None
 
-        hsv_crop = cv2.cvtColor(torso_crop, cv2.COLOR_BGR2HSV)
-
-        # Exclude green grass in HSV (Hue 35-85, Saturation > 40)
-        lower_green = np.array([35, 40, 40], dtype=np.uint8)
-        upper_green = np.array([85, 255, 255], dtype=np.uint8)
-        mask = cv2.inRange(hsv_crop, lower_green, upper_green)
-        non_pitch_mask = cv2.bitwise_not(mask)
+        if CV2_AVAILABLE and cv2 is not None:
+            hsv_crop = cv2.cvtColor(torso_crop, cv2.COLOR_BGR2HSV)
+            # Exclude green grass in HSV (Hue 35-85, Saturation > 40)
+            lower_green = np.array([35, 40, 40], dtype=np.uint8)
+            upper_green = np.array([85, 255, 255], dtype=np.uint8)
+            mask = cv2.inRange(hsv_crop, lower_green, upper_green)
+            non_pitch_mask = cv2.bitwise_not(mask)
+        else:
+            b = torso_crop[..., 0].astype(np.float32) / 255.0
+            g = torso_crop[..., 1].astype(np.float32) / 255.0
+            r = torso_crop[..., 2].astype(np.float32) / 255.0
+            mx = np.maximum(np.maximum(r, g), b)
+            mn = np.minimum(np.minimum(r, g), b)
+            df = mx - mn + 1e-7
+            h = np.zeros_like(mx)
+            h[mx == r] = (60 * ((g - b) / df) + 360) % 360
+            h[mx == g] = (60 * ((b - r) / df) + 120) % 360
+            h[mx == b] = (60 * ((r - g) / df) + 240) % 360
+            s = np.zeros_like(mx)
+            s[mx > 0] = (df / (mx + 1e-7)) * 255.0
+            v = mx * 255.0
+            hsv_crop = np.stack([h / 2.0, s, v], axis=-1).astype(np.uint8)
+            non_pitch_mask = ~((hsv_crop[..., 0] >= 35) & (hsv_crop[..., 0] <= 85) & (hsv_crop[..., 1] >= 40))
 
         valid_pixels = hsv_crop[non_pitch_mask > 0]
         if len(valid_pixels) < 20:

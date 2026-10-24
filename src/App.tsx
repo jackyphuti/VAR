@@ -78,6 +78,9 @@ export const App: React.FC = () => {
     show3DLines: true,
     showPitchGrid: true,
     showRadarMinimap: true,
+    show3DCurtain: true,
+    show29PointLimbMesh: true,
+    show500HzImuGraph: true,
   });
 
   // Goal-Line Technology State (Part B.1)
@@ -667,6 +670,15 @@ export const App: React.FC = () => {
                 }
                 onToggleRadar={() =>
                   setSaotState((prev) => ({ ...prev, showRadarMinimap: !prev.showRadarMinimap }))
+                }
+                onToggle3DCurtain={() =>
+                  setSaotState((prev) => ({ ...prev, show3DCurtain: !prev.show3DCurtain }))
+                }
+                onToggle29PointLimbMesh={() =>
+                  setSaotState((prev) => ({ ...prev, show29PointLimbMesh: !prev.show29PointLimbMesh }))
+                }
+                onToggle500HzImuGraph={() =>
+                  setSaotState((prev) => ({ ...prev, show500HzImuGraph: !prev.show500HzImuGraph }))
                 }
                 onResetCalibration={() =>
                   setSaotState((prev) => ({

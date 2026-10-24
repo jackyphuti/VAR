@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SaotState } from '../../types/var';
-import { Target, Lock, Unlock, Eye, Compass, RotateCcw, AlertTriangle, CheckCircle2, Sliders } from 'lucide-react';
+import { Target, Lock, Unlock, Eye, Compass, RotateCcw, AlertTriangle, CheckCircle2, Sliders, Layers, UserCheck, Activity } from 'lucide-react';
 
 interface SaotCalibrationPanelProps {
   saotState: SaotState;
@@ -10,6 +10,9 @@ interface SaotCalibrationPanelProps {
   onUpdateAttackerPoint: (updates: Partial<SaotState['attacker']>) => void;
   onToggle3DLines: () => void;
   onToggleRadar: () => void;
+  onToggle3DCurtain?: () => void;
+  onToggle29PointLimbMesh?: () => void;
+  onToggle500HzImuGraph?: () => void;
   onResetCalibration: () => void;
 }
 
@@ -37,6 +40,9 @@ export const SaotCalibrationPanel: React.FC<SaotCalibrationPanelProps> = ({
   onUpdateAttackerPoint,
   onToggle3DLines,
   onToggleRadar,
+  onToggle3DCurtain,
+  onToggle29PointLimbMesh,
+  onToggle500HzImuGraph,
   onResetCalibration,
 }) => {
   const [axisMode, setAxisMode] = useState<'X' | 'Y' | 'Z'>('X');
@@ -69,32 +75,65 @@ export const SaotCalibrationPanel: React.FC<SaotCalibrationPanelProps> = ({
   return (
     <div className="bg-[#111827] border border-[#1F2937] rounded-lg p-3 space-y-3 shadow-xl">
       {/* Panel Header */}
-      <div className="flex items-center justify-between border-b border-[#1F2937] pb-2">
+      <div className="flex flex-wrap items-center justify-between border-b border-[#1F2937] pb-2 gap-2">
         <div className="flex items-center space-x-2">
           <Target className="w-4 h-4 text-sky-400" />
           <h3 className="font-bold text-xs uppercase tracking-wider text-gray-200">
             SAOT 3D Offside Calibration Engine
           </h3>
         </div>
-        <div className="flex items-center space-x-1">
+        <div className="flex flex-wrap items-center gap-1">
           <button
             onClick={onToggle3DLines}
             title="Toggle 3D grass projection lines"
-            className={`p-1 rounded text-xs flex items-center gap-1 transition ${
+            className={`px-1.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition ${
               saotState.show3DLines ? 'bg-sky-600 text-white' : 'bg-[#1F2937] text-gray-400 hover:text-white'
             }`}
           >
-            <Eye className="w-3.5 h-3.5" /> 3D Lines
+            <Eye className="w-3 h-3" /> Lines
           </button>
+          {onToggle3DCurtain && (
+            <button
+              onClick={onToggle3DCurtain}
+              title="Toggle FIFA 3D Virtual Offside Curtain (Vertical Wall)"
+              className={`px-1.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition ${
+                saotState.show3DCurtain ? 'bg-blue-600 text-white shadow' : 'bg-[#1F2937] text-gray-400 hover:text-white'
+              }`}
+            >
+              <Layers className="w-3 h-3" /> 3D Curtain
+            </button>
+          )}
+          {onToggle29PointLimbMesh && (
+            <button
+              onClick={onToggle29PointLimbMesh}
+              title="Toggle FIFA SAOT 29-Point Anatomical Limb Tracking Wireframe"
+              className={`px-1.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition ${
+                saotState.show29PointLimbMesh ? 'bg-amber-600 text-white shadow' : 'bg-[#1F2937] text-gray-400 hover:text-white'
+              }`}
+            >
+              <UserCheck className="w-3 h-3" /> 29-Pt Mesh
+            </button>
+          )}
           <button
             onClick={onToggleRadar}
             title="Toggle 2D pitch radar minimap"
-            className={`p-1 rounded text-xs flex items-center gap-1 transition ${
+            className={`px-1.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition ${
               saotState.showRadarMinimap ? 'bg-sky-600 text-white' : 'bg-[#1F2937] text-gray-400 hover:text-white'
             }`}
           >
-            <Compass className="w-3.5 h-3.5" /> Radar
+            <Compass className="w-3 h-3" /> Radar
           </button>
+          {onToggle500HzImuGraph && (
+            <button
+              onClick={onToggle500HzImuGraph}
+              title="Toggle Adidas 500Hz Connected Ball Inertial Sensor Waveform"
+              className={`px-1.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition ${
+                saotState.show500HzImuGraph ? 'bg-emerald-600 text-white shadow' : 'bg-[#1F2937] text-gray-400 hover:text-white'
+              }`}
+            >
+              <Activity className="w-3 h-3" /> Ball IMU
+            </button>
+          )}
           <button
             onClick={onResetCalibration}
             title="Reset to default AI calibration"

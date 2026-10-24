@@ -15,7 +15,12 @@ import sys
 import time
 from typing import Optional
 
-import cv2
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None
+    CV2_AVAILABLE = False
 import numpy as np
 
 from .detector import PlayerDetector, TrackedObject

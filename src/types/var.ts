@@ -97,6 +97,9 @@ export interface SaotState {
   show3DLines: boolean;
   showPitchGrid: boolean;
   showRadarMinimap: boolean;
+  show3DCurtain: boolean;
+  show29PointLimbMesh: boolean;
+  show500HzImuGraph: boolean;
 }
 
 export interface DogsoState {

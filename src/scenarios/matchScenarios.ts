@@ -305,3 +305,88 @@ export function getScenarioFrameState(scenarioId: ScenarioId, frame: number): Sc
     },
   };
 }
+
+/**
+ * 500Hz Adidas Connected Ball Inertial Sensor (IMU) High-Speed Telemetry
+ * Models the CTR-CORE suspension sensor operating at 500 samples/sec (8.33 samples/frame).
+ */
+export interface ConnectedBallImuSample {
+  frame: number;
+  timeMs: number;
+  accelG: number;
+  isPeak: boolean;
+}
+
+export interface ConnectedBallImuData {
+  sensorActive: boolean;
+  sampleRateHz: number;
+  currentFrame: number;
+  currentAccelG: number;
+  peakAccelG: number;
+  contactFrame: number;
+  isContactActive: boolean;
+  samples: ConnectedBallImuSample[];
+}
+
+export function getConnectedBallImuData(
+  scenarioId: ScenarioId,
+  currentFrame: number,
+  windowFrames: number = 48
+): ConnectedBallImuData {
+  const scen = MATCH_SCENARIOS.find((s) => s.id === scenarioId) || MATCH_SCENARIOS[0];
+  const contactFrame = scen.kickFrame;
+  const peakTargetG =
+    scenarioId === 'tight_offside'
+      ? 41.8
+      : scenarioId === 'penalty_tackle'
+      ? 36.2
+      : scenarioId === 'goal_line_handball'
+      ? 32.5
+      : 44.1;
+
+  const samples: ConnectedBallImuSample[] = [];
+  const startF = Math.max(0, currentFrame - Math.floor(windowFrames / 2));
+  const endF = Math.min(scen.totalFrames - 1, startF + windowFrames);
+
+  let currentG = 1.2;
+
+  for (let f = startF; f <= endF; f++) {
+    for (let sub = 0; sub < 4; sub++) {
+      const subFrameTime = f + sub * 0.25;
+      const distFromContact = subFrameTime - contactFrame;
+      const isPeak = Math.abs(distFromContact) < 0.15;
+
+      let g = 1.2 + 0.45 * Math.sin(subFrameTime * 1.8) + 0.25 * Math.cos(subFrameTime * 4.3);
+      if (Math.abs(distFromContact) < 2.2) {
+        const spike = peakTargetG * Math.exp(-Math.pow(distFromContact / 0.55, 2));
+        const ringing = 6.5 * Math.exp(-Math.max(0, distFromContact) / 1.1) * Math.sin(distFromContact * 15.0);
+        g += spike + ringing;
+      }
+      g = Math.max(0.4, Number(g.toFixed(2)));
+
+      if (f === currentFrame && sub === 0) {
+        currentG = g;
+      }
+
+      samples.push({
+        frame: f,
+        timeMs: Math.round(subFrameTime * 16.667),
+        accelG: g,
+        isPeak,
+      });
+    }
+  }
+
+  const isContactActive = Math.abs(currentFrame - contactFrame) <= 1;
+
+  return {
+    sensorActive: true,
+    sampleRateHz: 500,
+    currentFrame,
+    currentAccelG: currentG,
+    peakAccelG: peakTargetG,
+    contactFrame,
+    isContactActive,
+    samples,
+  };
+}
