@@ -23,7 +23,10 @@ except ImportError:
     CV2_AVAILABLE = False
 import numpy as np
 
-from .homography import PitchHomography
+try:
+    from .homography import PitchHomography
+except ImportError:
+    from homography import PitchHomography
 
 try:
     from ultralytics import YOLO

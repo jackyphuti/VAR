@@ -23,11 +23,23 @@ except ImportError:
     CV2_AVAILABLE = False
 import numpy as np
 
-from .detector import PlayerDetector, TrackedObject
-from .homography import PitchHomography
-from .incident_detector import IncidentDetector
-from .offside_engine import OffsideEngine
-from .pose_analyzer import PoseAnalyzer
+try:
+    from .detector import PlayerDetector, TrackedObject
+    from .homography import PitchHomography
+    from .incident_detector import IncidentDetector
+    from .offside_engine import OffsideEngine
+    from .pose_analyzer import PoseAnalyzer
+except ImportError:
+    import sys
+    from pathlib import Path
+    _pkg_dir = str(Path(__file__).resolve().parent)
+    if _pkg_dir not in sys.path:
+        sys.path.insert(0, _pkg_dir)
+    from detector import PlayerDetector, TrackedObject
+    from homography import PitchHomography
+    from incident_detector import IncidentDetector
+    from offside_engine import OffsideEngine
+    from pose_analyzer import PoseAnalyzer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -214,7 +226,10 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.server:
-        from .server import start_server
+        try:
+            from .server import start_server
+        except ImportError:
+            from server import start_server
         start_server(port=args.port)
     else:
         run_pipeline(

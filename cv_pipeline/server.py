@@ -34,11 +34,29 @@ try:
 except ImportError:
     FASTAPI_AVAILABLE = False
 
-from .detector import PlayerDetector, TrackedObject
-from .homography import PitchHomography
-from .incident_detector import IncidentDetector
-from .offside_engine import OffsideEngine
-from .pose_analyzer import PoseAnalyzer
+try:
+    import multipart
+    MULTIPART_AVAILABLE = True
+except ImportError:
+    MULTIPART_AVAILABLE = False
+
+try:
+    from .detector import PlayerDetector, TrackedObject
+    from .homography import PitchHomography
+    from .incident_detector import IncidentDetector
+    from .offside_engine import OffsideEngine
+    from .pose_analyzer import PoseAnalyzer
+except ImportError:
+    import sys
+    from pathlib import Path
+    _pkg_dir = str(Path(__file__).resolve().parent)
+    if _pkg_dir not in sys.path:
+        sys.path.insert(0, _pkg_dir)
+    from detector import PlayerDetector, TrackedObject
+    from homography import PitchHomography
+    from incident_detector import IncidentDetector
+    from offside_engine import OffsideEngine
+    from pose_analyzer import PoseAnalyzer
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("VAR.Server")
@@ -240,7 +258,8 @@ async def websocket_telemetry_stream(websocket: WebSocket):
 def start_server(host: str = "0.0.0.0", port: int = 8000):
     """CLI runner for uvicorn."""
     import uvicorn
-    uvicorn.run("cv_pipeline.server:app", host=host, port=port, reload=False)
+    app_target = "cv_pipeline.server:app" if __package__ else "server:app"
+    uvicorn.run(app_target, host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":

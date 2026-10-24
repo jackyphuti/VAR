@@ -23,8 +23,12 @@ except ImportError:
     CV2_AVAILABLE = False
 import numpy as np
 
-from .detector import TrackedObject
-from .homography import PitchHomography
+try:
+    from .detector import TrackedObject
+    from .homography import PitchHomography
+except ImportError:
+    from detector import TrackedObject
+    from homography import PitchHomography
 
 logger = logging.getLogger("VAR.IncidentDetector")
 
